@@ -783,19 +783,19 @@ async function createWasm() {
   var addOnPreRun = (cb) => onPreRuns.push(cb);
 
   var runDependencies = 0;
-
-
+  
+  
   var dependenciesFulfilled = null;
-
+  
   var runDependencyTracking = {
   };
-
+  
   var runDependencyWatcher = null;
   var removeRunDependency = (id) => {
       runDependencies--;
-
+  
       Module['monitorRunDependencies']?.(runDependencies);
-
+  
       assert(id, 'removeRunDependency requires an ID');
       assert(runDependencyTracking[id]);
       delete runDependencyTracking[id];
@@ -811,13 +811,13 @@ async function createWasm() {
         }
       }
     };
-
-
+  
+  
   var addRunDependency = (id) => {
       runDependencies++;
-
+  
       Module['monitorRunDependencies']?.(runDependencies);
-
+  
       assert(id, 'addRunDependency requires an ID')
       assert(!runDependencyTracking[id]);
       runDependencyTracking[id] = 1;
@@ -848,7 +848,7 @@ async function createWasm() {
     };
 
 
-
+  
     /**
    * @param {number} ptr
    * @param {string} type
@@ -878,7 +878,7 @@ async function createWasm() {
     };
 
 
-
+  
     /**
    * @param {number} ptr
    * @param {number} value
@@ -912,7 +912,7 @@ async function createWasm() {
       }
     };
 
-
+  
 
   var __abort_js = () =>
       abort('native code called abort()');
@@ -928,7 +928,7 @@ async function createWasm() {
     };
 
   var UTF8Decoder = globalThis.TextDecoder && new TextDecoder();
-
+  
   var findStringEnd = (heapOrArray, idx, maxBytesToRead, ignoreNul) => {
       var maxIdx = idx + maxBytesToRead;
       if (ignoreNul) return maxIdx;
@@ -939,8 +939,8 @@ async function createWasm() {
       while (heapOrArray[idx] && !(idx >= maxIdx)) ++idx;
       return idx;
     };
-
-
+  
+  
     /**
    * Given a pointer 'idx' to a null-terminated UTF8-encoded string in the given
    * array that contains uint8 values, returns a copy of that string as a
@@ -952,9 +952,9 @@ async function createWasm() {
    * @return {string}
    */
   var UTF8ArrayToString = (heapOrArray, idx = 0, maxBytesToRead, ignoreNul) => {
-
+  
       var endPtr = findStringEnd(heapOrArray, idx, maxBytesToRead, ignoreNul);
-
+  
       // When using conditional TextDecoder, skip it for short strings as the overhead of the native call is not worth it.
       if (endPtr - idx > 16 && heapOrArray.buffer && UTF8Decoder) {
         return UTF8Decoder.decode(heapOrArray.subarray(idx, endPtr));
@@ -976,7 +976,7 @@ async function createWasm() {
           if ((u0 & 0xF8) != 0xF0) warnOnce('Invalid UTF-8 leading byte ' + ptrToString(u0) + ' encountered when deserializing a UTF-8 string in wasm memory to a JS string!');
           u0 = ((u0 & 7) << 18) | (u1 << 12) | (u2 << 6) | (heapOrArray[idx++] & 63);
         }
-
+  
         if (u0 < 0x10000) {
           str += String.fromCharCode(u0);
         } else {
@@ -986,7 +986,7 @@ async function createWasm() {
       }
       return str;
     };
-
+  
     /**
    * Given a pointer 'ptr' to a null-terminated UTF8-encoded string in the
    * emscripten HEAP, returns a copy of that string as a Javascript String object.
@@ -1016,19 +1016,19 @@ async function createWasm() {
     };
 
   var INT53_MAX = 9007199254740992;
-
+  
   var INT53_MIN = -9007199254740992;
   var bigintToI53Checked = (num) => (num < INT53_MIN || num > INT53_MAX) ? NaN : Number(num);
   function _fd_seek(fd, offset, whence, newOffset) {
     offset = bigintToI53Checked(offset);
-
-
+  
+  
       return 70;
     ;
   }
 
   var printCharBuffers = [null,[],[]];
-
+  
   var printChar = (stream, curr) => {
       var buffer = printCharBuffers[stream];
       assert(buffer);
@@ -1039,15 +1039,15 @@ async function createWasm() {
         buffer.push(curr);
       }
     };
-
+  
   var flush_NO_FILESYSTEM = () => {
       // flush anything remaining in the buffers during shutdown
       _fflush(0);
       if (printCharBuffers[1].length) printChar(1, 10);
       if (printCharBuffers[2].length) printChar(2, 10);
     };
-
-
+  
+  
   var _fd_write = (fd, iov, iovcnt, pnum) => {
       // hack to support printf in SYSCALLS_REQUIRE_FILESYSTEM=0
       var num = 0;
@@ -1069,12 +1069,12 @@ async function createWasm() {
       assert(func, 'Cannot call unknown function ' + ident + ', make sure it is exported');
       return func;
     };
-
+  
   var writeArrayToMemory = (array, buffer) => {
       assert(array.length >= 0, 'writeArrayToMemory array must have a length (should be an array or typed array)')
       HEAP8.set(array, buffer);
     };
-
+  
   var lengthBytesUTF8 = (str) => {
       var len = 0;
       for (var i = 0; i < str.length; ++i) {
@@ -1095,14 +1095,14 @@ async function createWasm() {
       }
       return len;
     };
-
+  
   var stringToUTF8Array = (str, heap, outIdx, maxBytesToWrite) => {
       assert(typeof str === 'string', `stringToUTF8Array expects a string (got ${typeof str})`);
       // Parameter maxBytesToWrite is not optional. Negative values, 0, null,
       // undefined and false each don't write out any bytes.
       if (!(maxBytesToWrite > 0))
         return 0;
-
+  
       var startIdx = outIdx;
       var endIdx = outIdx + maxBytesToWrite - 1; // -1 for string null terminator.
       for (var i = 0; i < str.length; ++i) {
@@ -1142,7 +1142,7 @@ async function createWasm() {
       assert(typeof maxBytesToWrite == 'number', 'stringToUTF8(str, outPtr, maxBytesToWrite) is missing the third parameter that specifies the length of the output buffer!');
       return stringToUTF8Array(str, HEAPU8, outPtr, maxBytesToWrite);
     };
-
+  
   var stackAlloc = (sz) => __emscripten_stack_alloc(sz);
   var stringToUTF8OnStack = (str) => {
       var size = lengthBytesUTF8(str) + 1;
@@ -1150,11 +1150,11 @@ async function createWasm() {
       stringToUTF8(str, ret, size);
       return ret;
     };
-
-
-
-
-
+  
+  
+  
+  
+  
     /**
    * @param {string|null=} returnType
    * @param {Array=} argTypes
@@ -1177,7 +1177,7 @@ async function createWasm() {
           return ret;
         }
       };
-
+  
       function convertReturnValue(ret) {
         if (returnType === 'string') {
           return UTF8ToString(ret);
@@ -1185,7 +1185,7 @@ async function createWasm() {
         if (returnType === 'boolean') return Boolean(ret);
         return ret;
       }
-
+  
       var func = getCFunc(ident);
       var cArgs = [];
       var stack = 0;
@@ -1206,11 +1206,11 @@ async function createWasm() {
         if (stack !== 0) stackRestore(stack);
         return convertReturnValue(ret);
       }
-
+  
       ret = onDone(ret);
       return ret;
     };
-
+  
     /**
    * @param {string=} returnType
    * @param {Array=} argTypes
@@ -1688,6 +1688,8 @@ function checkIncomingModuleAPI() {
 
 // Imports from the Wasm binary.
 var _sokoban_init_web = Module['_sokoban_init_web'] = makeInvalidEarlyAccess('_sokoban_init_web');
+var _sokoban_init_web_level = Module['_sokoban_init_web_level'] = makeInvalidEarlyAccess('_sokoban_init_web_level');
+var _sokoban_count_levels_web = Module['_sokoban_count_levels_web'] = makeInvalidEarlyAccess('_sokoban_count_levels_web');
 var _sokoban_handle_input = Module['_sokoban_handle_input'] = makeInvalidEarlyAccess('_sokoban_handle_input');
 var _sokoban_is_event_ongoing = Module['_sokoban_is_event_ongoing'] = makeInvalidEarlyAccess('_sokoban_is_event_ongoing');
 var _sokoban_process_event = Module['_sokoban_process_event'] = makeInvalidEarlyAccess('_sokoban_process_event');
@@ -1710,6 +1712,8 @@ var wasmMemory = makeInvalidEarlyAccess('wasmMemory');
 
 function assignWasmExports(wasmExports) {
   assert(typeof wasmExports['sokoban_init_web'] != 'undefined', 'missing Wasm export: sokoban_init_web');
+  assert(typeof wasmExports['sokoban_init_web_level'] != 'undefined', 'missing Wasm export: sokoban_init_web_level');
+  assert(typeof wasmExports['sokoban_count_levels_web'] != 'undefined', 'missing Wasm export: sokoban_count_levels_web');
   assert(typeof wasmExports['sokoban_handle_input'] != 'undefined', 'missing Wasm export: sokoban_handle_input');
   assert(typeof wasmExports['sokoban_is_event_ongoing'] != 'undefined', 'missing Wasm export: sokoban_is_event_ongoing');
   assert(typeof wasmExports['sokoban_process_event'] != 'undefined', 'missing Wasm export: sokoban_process_event');
@@ -1729,6 +1733,8 @@ function assignWasmExports(wasmExports) {
   assert(typeof wasmExports['memory'] != 'undefined', 'missing Wasm export: memory');
   assert(typeof wasmExports['__indirect_function_table'] != 'undefined', 'missing Wasm export: __indirect_function_table');
   _sokoban_init_web = Module['_sokoban_init_web'] = createExportWrapper('sokoban_init_web', 1);
+  _sokoban_init_web_level = Module['_sokoban_init_web_level'] = createExportWrapper('sokoban_init_web_level', 2);
+  _sokoban_count_levels_web = Module['_sokoban_count_levels_web'] = createExportWrapper('sokoban_count_levels_web', 1);
   _sokoban_handle_input = Module['_sokoban_handle_input'] = createExportWrapper('sokoban_handle_input', 1);
   _sokoban_is_event_ongoing = Module['_sokoban_is_event_ongoing'] = createExportWrapper('sokoban_is_event_ongoing', 0);
   _sokoban_process_event = Module['_sokoban_process_event'] = createExportWrapper('sokoban_process_event', 0);

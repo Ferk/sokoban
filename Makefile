@@ -2,11 +2,13 @@
 CC = gcc
 EMCC = emcc
 CFLAGS = -Wall -Wextra -pedantic -std=c11
-EMCCFLAGS = -s EXPORTED_FUNCTIONS="['_sokoban_init_web', '_sokoban_handle_input', '_sokoban_get_rows', '_sokoban_get_cols', '_sokoban_get_tile', '_sokoban_is_game_won']" -s EXPORTED_RUNTIME_METHODS="['cwrap']"
+EMCCFLAGS = -s EXPORTED_FUNCTIONS="['_sokoban_init_web', '_sokoban_init_web_level', '_sokoban_count_levels_web', '_sokoban_handle_input', '_sokoban_is_event_ongoing', '_sokoban_process_event', '_sokoban_get_rows', '_sokoban_get_cols', '_sokoban_get_tile', '_sokoban_is_game_won']" -s EXPORTED_RUNTIME_METHODS="['cwrap']"
+TERMINAL_LIBS = -lm
 
 # Source files
-TERMINAL_SRCS = sokoban.c main_terminal.c
-WEB_SRCS = sokoban.c main_emsdk.c
+COMMON_SRCS = sokoban.c level_parser.c
+TERMINAL_SRCS = $(COMMON_SRCS) main_terminal.c vendor/argtable3.c
+WEB_SRCS = $(COMMON_SRCS) main_emsdk.c
 
 # Object files
 TERMINAL_OBJS = $(TERMINAL_SRCS:.c=.o)
@@ -28,7 +30,7 @@ web: $(WEB_JS)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(TERMINAL_EXE): $(TERMINAL_SRCS)
-	$(CC) $(CFLAGS) $^ -o $(TERMINAL_EXE)
+	$(CC) $(CFLAGS) $^ -o $(TERMINAL_EXE) $(TERMINAL_LIBS)
 
 $(WEB_JS): $(WEB_SRCS)
 	$(EMCC) $(CFLAGS) $(EMCCFLAGS) $^ -o $(WEB_JS)

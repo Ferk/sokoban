@@ -59,7 +59,10 @@ void clear_move_history(MoveHistory *history);
 void remember_initial_state(GameState *state);
 
 // Core game logic functions
-void load_level(GameState *state, FILE *file);
+bool load_level(GameState *state, FILE *file);
+bool load_level_at_index(GameState *state, FILE *file, size_t level_index);
+bool load_level_from_string(GameState *state, const char *level_data);
+bool load_level_from_string_at_index(GameState *state, const char *level_data, size_t level_index);
 void reset_game(GameState *state);
 bool is_game_won(GameState *state);
 bool move_player(GameState *state, int dr, int dc);

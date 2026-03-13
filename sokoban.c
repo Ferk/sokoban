@@ -1,4 +1,5 @@
 #include "sokoban.h"
+#include "level_parser.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -85,6 +86,19 @@ static void restore_initial_state(GameState *state) {
   state->event.dc = 0;
 }
 
+static void apply_level_state(GameState *state, const LevelState *level) {
+  memcpy(state->board, level->board, sizeof(state->board));
+  state->rows = level->rows;
+  state->cols = level->cols;
+  state->player_row = level->player_row;
+  state->player_col = level->player_col;
+  state->event.type = EVENT_NONE;
+  state->event.x = 0;
+  state->event.y = 0;
+  state->event.dr = 0;
+  state->event.dc = 0;
+}
+
 static bool replay_history(GameState *state, size_t move_count) {
   restore_initial_state(state);
   state->history.size = 0;
@@ -133,47 +147,40 @@ void remember_initial_state(GameState *state) {
   state->initial_state.player_col = state->player_col;
 }
 
-void load_level(GameState *state, FILE *file) {
-  if (!file) {
-    // This is a terminal-specific error, but for the sake of the example,
-    // we keep a simple fopen. In a web version, the file would be loaded
-    // differently (e.g., passed as a string).
-    perror("Error opening file");
-    exit(EXIT_FAILURE);
+bool load_level(GameState *state, FILE *file) {
+  return load_level_at_index(state, file, 0);
+}
+
+bool load_level_at_index(GameState *state, FILE *file, size_t level_index) {
+  LevelState level;
+
+  if (file == NULL) {
+    return false;
   }
-  state->event.type = EVENT_NONE;
-  state->rows = 0;
-  state->cols = 0;
-  char line[MAX_COLS + 2];
-  while (fgets(line, sizeof(line), file)) {
-    int j = 0;
-    while (line[j] != '\n' && line[j] != '\0') {
-      switch (line[j]) {
-        case PLAYER:
-        case PLAYER_ON_GOAL:
-        case PLAYER_ON_ICE:
-          state->player_row = state->rows;
-          state->player_col = j;
-          /* FALLTHROUGH -- avoid compiler warnings */
-        case WALL:
-        case GOAL:
-        case ICE:
-        case BOX:
-        case BOX_ON_GOAL:
-        case BOX_ON_ICE:
-          state->board[state->rows][j] = line[j];
-          break;
-        default:
-          state->board[state->rows][j] = FLOOR;
-      }
-      j++;
-    }
-    if (state->cols < j) state->cols = j;
-    for (; j < MAX_COLS; j++) {
-      state->board[state->rows][j] = ' ';
-    }
-    state->rows++;
+  if (!parse_sok_level_from_file(file, level_index, &level)) {
+    return false;
   }
+
+  apply_level_state(state, &level);
+  return true;
+}
+
+bool load_level_from_string(GameState *state, const char *level_data) {
+  return load_level_from_string_at_index(state, level_data, 0);
+}
+
+bool load_level_from_string_at_index(GameState *state, const char *level_data, size_t level_index) {
+  LevelState level;
+
+  if (level_data == NULL) {
+    return false;
+  }
+  if (!parse_sok_level_from_string(level_data, level_index, &level)) {
+    return false;
+  }
+
+  apply_level_state(state, &level);
+  return true;
 }
 
 void reset_game(GameState *state) {

@@ -1,4 +1,6 @@
+#include "level_parser.h"
 #include "sokoban.h"
+#include "vendor/argtable3.h"
 
 #ifdef _WIN32
 #include <conio.h>
@@ -12,9 +14,12 @@
 int nanosleep(const struct timespec *req, struct timespec *rem);
 #endif
 
+#include <ctype.h>
+#include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 // ANSI color codes
 #define COLOR_RESET "\033[0m"
@@ -27,9 +32,277 @@ int nanosleep(const struct timespec *req, struct timespec *rem);
 #define COLOR_ICE "\033[46;97m"            // Dark cyan background, dark white foreground
 #define COLOR_PLAYER_ON_ICE "\033[46;96m"  // Dark cyan background, bright cyan foreground
 #define COLOR_BOX_ON_ICE "\033[46;93m"     // Dark cyan background, bright yellow foreground
+#define COLOR_TITLE "\033[96m"             // Bright cyan foreground
+#define COLOR_STATUS "\033[93m"            // Bright yellow foreground
 
 // milliseconds to wait before running a "tic" during game events
 #define TIC_DURATION_MS 100
+
+typedef struct {
+  size_t *levels;
+  size_t count;
+  size_t capacity;
+} LevelSequence;
+
+typedef struct {
+  bool enabled;
+  int drawn_rows;
+} BoardRenderState;
+
+static void init_level_sequence(LevelSequence *sequence) {
+  sequence->levels = NULL;
+  sequence->count = 0;
+  sequence->capacity = 0;
+}
+
+static void clear_level_sequence(LevelSequence *sequence) {
+  free(sequence->levels);
+  sequence->levels = NULL;
+  sequence->count = 0;
+  sequence->capacity = 0;
+}
+
+static bool append_level(LevelSequence *sequence, size_t level_index) {
+  size_t new_capacity = 0;
+  size_t *new_levels = NULL;
+
+  if (sequence->count < sequence->capacity) {
+    sequence->levels[sequence->count++] = level_index;
+    return true;
+  }
+
+  new_capacity = (sequence->capacity == 0) ? 8 : sequence->capacity * 2;
+  new_levels = (size_t *)realloc(sequence->levels, new_capacity * sizeof(*new_levels));
+  if (new_levels == NULL) {
+    return false;
+  }
+
+  sequence->levels = new_levels;
+  sequence->capacity = new_capacity;
+  sequence->levels[sequence->count++] = level_index;
+  return true;
+}
+
+static void skip_level_spec_spaces(const char **cursor) {
+  while (**cursor != '\0' && isspace((unsigned char)**cursor)) {
+    (*cursor)++;
+  }
+}
+
+static bool parse_level_number(const char **cursor, size_t *out_number, char *error, size_t error_size) {
+  char *end = NULL;
+  unsigned long long value = 0;
+
+  if (!isdigit((unsigned char)**cursor)) {
+    snprintf(error, error_size, "expected a level number near '%s'", *cursor);
+    return false;
+  }
+
+  errno = 0;
+  value = strtoull(*cursor, &end, 10);
+  if (errno == ERANGE) {
+    snprintf(error, error_size, "level number is too large");
+    return false;
+  }
+  if (value == 0) {
+    snprintf(error, error_size, "level numbers are 1-based");
+    return false;
+  }
+
+  *cursor = end;
+  *out_number = (size_t)value;
+  return true;
+}
+
+static bool append_level_range(LevelSequence *sequence, size_t first_level, size_t last_level) {
+  for (size_t level = first_level; level <= last_level; level++) {
+    if (!append_level(sequence, level - 1)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static bool parse_level_spec(const char *spec, size_t total_levels, LevelSequence *sequence, char *error, size_t error_size) {
+  const char *cursor = spec;
+  bool expecting_token = true;
+
+  if (spec == NULL || spec[0] == '\0') {
+    snprintf(error, error_size, "level selector cannot be empty");
+    return false;
+  }
+
+  while (true) {
+    size_t first_level = 0;
+    size_t last_level = 0;
+
+    skip_level_spec_spaces(&cursor);
+    if (*cursor == '\0') {
+      if (expecting_token) {
+        snprintf(error, error_size, "incomplete level selector");
+        return false;
+      }
+      return true;
+    }
+
+    if (!parse_level_number(&cursor, &first_level, error, error_size)) {
+      return false;
+    }
+
+    skip_level_spec_spaces(&cursor);
+    last_level = first_level;
+    if (*cursor == '-') {
+      cursor++;
+      skip_level_spec_spaces(&cursor);
+
+      if (*cursor == '\0' || *cursor == ',') {
+        last_level = total_levels;
+      } else if (!parse_level_number(&cursor, &last_level, error, error_size)) {
+        return false;
+      }
+    }
+
+    if (first_level > total_levels) {
+      snprintf(error, error_size, "level %zu is outside this file (only %zu levels available)", first_level, total_levels);
+      return false;
+    }
+    if (last_level > total_levels) {
+      snprintf(error, error_size, "level %zu is outside this file (only %zu levels available)", last_level, total_levels);
+      return false;
+    }
+    if (last_level < first_level) {
+      snprintf(error, error_size, "invalid descending range %zu-%zu", first_level, last_level);
+      return false;
+    }
+
+    if (!append_level_range(sequence, first_level, last_level)) {
+      snprintf(error, error_size, "out of memory while storing selected levels");
+      return false;
+    }
+
+    skip_level_spec_spaces(&cursor);
+    if (*cursor == '\0') {
+      return true;
+    }
+    if (*cursor != ',') {
+      snprintf(error, error_size, "unexpected character '%c' in level selector", *cursor);
+      return false;
+    }
+
+    cursor++;
+    expecting_token = true;
+  }
+}
+
+static bool count_levels_in_path(const char *level_path, size_t *out_total_levels, char *error, size_t error_size) {
+  FILE *file = fopen(level_path, "r");
+  bool counted = false;
+
+  if (file == NULL) {
+    snprintf(error, error_size, "could not open '%s': %s", level_path, strerror(errno));
+    return false;
+  }
+
+  counted = count_sok_levels_in_file(file, out_total_levels);
+  fclose(file);
+  if (!counted) {
+    snprintf(error, error_size, "could not parse '%s' while counting levels", level_path);
+    return false;
+  }
+  if (*out_total_levels == 0) {
+    snprintf(error, error_size, "no playable levels were found in '%s'", level_path);
+    return false;
+  }
+
+  return true;
+}
+
+static bool build_level_sequence(const char *level_path, const arg_str_t *level_specs, LevelSequence *sequence, char *error, size_t error_size) {
+  char detail[256];
+  size_t total_levels = 0;
+
+  if (!count_levels_in_path(level_path, &total_levels, error, error_size)) {
+    return false;
+  }
+
+  if (level_specs->count == 0) {
+    if (!append_level_range(sequence, 1, total_levels)) {
+      snprintf(error, error_size, "out of memory while storing selected levels");
+      return false;
+    }
+    return true;
+  }
+
+  for (int i = 0; i < level_specs->count; i++) {
+    if (!parse_level_spec(level_specs->sval[i], total_levels, sequence, detail, sizeof(detail))) {
+      snprintf(error, error_size, "invalid --level '%s': %s", level_specs->sval[i], detail);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+static void print_help(const char *program_name) {
+  printf("Sokoban terminal frontend\n\n");
+  printf("Usage:\n");
+  printf("  %s [-h] [--noredraw] [-l <spec>]... <level-file>\n\n", program_name);
+
+  printf("Options:\n");
+  printf("  -h, --help                show this help and exit\n");
+  printf("  -l, --level <spec>        play only selected 1-based levels; accepts N, A-B,\n");
+  printf("                            A-, comma lists, and repeated flags\n");
+  printf("  --noredraw                append each board state instead of redrawing in place\n");
+  printf("  <level-file>              path to a .sok pack or single-level file\n");
+
+  printf("\nExamples:\n");
+  printf("  %s level.sok\n", program_name);
+  printf("  %s --level 2-5 easy.sok\n", program_name);
+  printf("  %s -l 1,4,10-12,15 easy.sok\n", program_name);
+  printf("  %s -l 5- easy.sok\n", program_name);
+  printf("  %s -l 1-3 -l 8 easy.sok\n", program_name);
+  printf("  %s --noredraw easy.sok\n", program_name);
+
+  printf("\nControls:\n");
+  printf("  WASD / HJKL / arrow keys  move\n");
+  printf("  u                         undo current level\n");
+  printf("  r                         reset current level\n");
+  printf("  q                         quit\n");
+}
+
+static void reset_board_render_state(BoardRenderState *render_state) {
+  render_state->drawn_rows = 0;
+}
+
+static void print_metadata_with_title(const char *metadata, const char *title) {
+  const char *line = metadata;
+  size_t title_len = 0;
+
+  if (metadata == NULL || metadata[0] == '\0') {
+    return;
+  }
+
+  if (title != NULL) {
+    title_len = strlen(title);
+  }
+
+  while (line != NULL) {
+    const char *next = strchr(line, '\n');
+    size_t line_len = (next != NULL) ? (size_t)(next - line) : strlen(line);
+    bool is_title = (title != NULL && title_len > 0 && line_len == title_len && strncmp(line, title, line_len) == 0);
+
+    if (is_title) {
+      printf("%s%.*s%s\n", COLOR_TITLE, (int)line_len, line, COLOR_RESET);
+    } else {
+      printf("%.*s\n", (int)line_len, line);
+    }
+
+    if (next == NULL) {
+      break;
+    }
+    line = next + 1;
+  }
+}
 
 void clear_screen(void) {
 #ifdef _WIN32
@@ -54,9 +327,17 @@ void delay(int milliseconds) {
 #endif
 }
 
-void print_board(GameState *state) {
-  // clear_screen();
+void print_board(GameState *state, BoardRenderState *render_state) {
+  bool redrawing = render_state->enabled && render_state->drawn_rows > 0;
+
+  if (redrawing) {
+    printf("\033[%dA", render_state->drawn_rows);
+  }
+
   for (int i = 0; i < state->rows; i++) {
+    if (redrawing) {
+      printf("\r\033[2K");
+    }
     for (int j = 0; j < state->cols; j++) {
       switch (state->board[i][j]) {
         case WALL:
@@ -93,6 +374,9 @@ void print_board(GameState *state) {
     }
     printf("\n");
   }
+
+  fflush(stdout);
+  render_state->drawn_rows = state->rows;
 }
 
 int getch_noblock(void) {
@@ -155,22 +439,96 @@ void disable_raw_mode(void) {
 #endif
 }
 
-int main(int argc, char *argv[]) {
-  if (argc != 2) {
-    printf("Usage: %s <level_file>\n", argv[0]);
-    return EXIT_FAILURE;
-  }
-  GameState state;
-  init_move_history(&state.history);
+static bool load_terminal_level(GameState *state, const char *level_path, size_t level_index) {
+  FILE *file = fopen(level_path, "r");
+  char *level_metadata = NULL;
+  char *level_title = NULL;
+  bool loaded = false;
 
-  FILE *file = fopen(argv[1], "r");
   if (!file) {
     perror("Error opening file");
-    exit(EXIT_FAILURE);
+    return false;
   }
-  load_level(&state, file);
-  remember_initial_state(&state);
+
+  if (!parse_sok_level_title_from_file(file, level_index, &level_title)) {
+    fclose(file);
+    return false;
+  }
+
+  rewind(file);
+  if (parse_sok_level_metadata_from_file(file, level_index, &level_metadata) && level_metadata != NULL && level_metadata[0] != '\0') {
+    print_metadata_with_title(level_metadata, level_title);
+    printf("\n\n");
+  }
+  free(level_metadata);
+  free(level_title);
+
+  rewind(file);
+  loaded = load_level_at_index(state, file, level_index);
   fclose(file);
+  if (!loaded) {
+    return false;
+  }
+
+  remember_initial_state(state);
+  state->history.size = 0;
+  return true;
+}
+
+int main(int argc, char *argv[]) {
+  arg_lit_t *help = arg_lit0("h", "help", "show this help and exit");
+  arg_str_t *level_option = arg_strn("l", "level", "<spec>", 0, 64, "play only selected 1-based levels; accepts N, A-B, A-, comma lists, and repeated flags");
+  arg_lit_t *noredraw = arg_lit0(NULL, "noredraw", "append each board state instead of redrawing in place");
+  arg_file_t *level_file = arg_file1(NULL, NULL, "<level-file>", "path to a .sok pack or single-level file");
+  arg_end_t *end = arg_end(20);
+  void *argtable[] = {help, level_option, noredraw, level_file, end};
+  BoardRenderState render_state;
+  LevelSequence level_sequence;
+  GameState state;
+  char level_error[256];
+  int exit_code = EXIT_FAILURE;
+  int nerrors = 0;
+  size_t current_level_index = 0;
+  size_t current_sequence_index = 0;
+  bool custom_selection = false;
+  bool history_initialized = false;
+#ifndef _WIN32
+  bool raw_mode_enabled = false;
+#endif
+
+  init_level_sequence(&level_sequence);
+  render_state.enabled = false;
+  reset_board_render_state(&render_state);
+  nerrors = arg_parse(argc, argv, argtable);
+
+  if (help->count > 0) {
+    print_help(argv[0]);
+    exit_code = EXIT_SUCCESS;
+    goto cleanup;
+  }
+
+  if (nerrors > 0) {
+    arg_print_errors(stderr, end, argv[0]);
+    fprintf(stderr, "\nTry '%s --help' for more information.\n", argv[0]);
+    goto cleanup;
+  }
+
+  custom_selection = (level_option->count > 0);
+  render_state.enabled = (noredraw->count == 0);
+  if (!build_level_sequence(level_file->filename[0], level_option, &level_sequence, level_error, sizeof(level_error))) {
+    fprintf(stderr, "%s\n", level_error);
+    fprintf(stderr, "Try '%s --help' for more information.\n", argv[0]);
+    goto cleanup;
+  }
+
+  init_move_history(&state.history);
+  history_initialized = true;
+
+  current_level_index = level_sequence.levels[current_sequence_index];
+  if (!load_terminal_level(&state, level_file->filename[0], current_level_index)) {
+    fprintf(stderr, "Error parsing level file: %s\n", level_file->filename[0]);
+    goto cleanup;
+  }
 
 #ifdef _WIN32
   HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -180,9 +538,10 @@ int main(int argc, char *argv[]) {
   SetConsoleMode(hOut, dwMode);
 #else
   enable_raw_mode();
+  raw_mode_enabled = true;
 #endif
 
-  print_board(&state);
+  print_board(&state, &render_state);
 
   while (true) {
     int input = getch_noblock();
@@ -232,7 +591,7 @@ int main(int argc, char *argv[]) {
         continue;
     }
     if (updated) {
-      print_board(&state);
+      print_board(&state, &render_state);
     }
 
     // If there's an ongoing event, process it and redraw each gametic
@@ -242,22 +601,45 @@ int main(int argc, char *argv[]) {
       // state.event.dr, state.event.dc);
       delay(TIC_DURATION_MS);
       if (process_event(&state)) {
-        print_board(&state);
+        print_board(&state, &render_state);
       }
     }
 
     if (is_game_won(&state)) {
-      printf("Congratulations! You won!\n");
-      printf("Total steps taken: %zu\n", state.history.size);
-      printf("Move history: %.*s\n", (int)state.history.size, state.history.moves);
-      break;
+      printf("%sLevel %zu complete!%s\n", COLOR_STATUS, current_level_index + 1, COLOR_RESET);
+      printf("%sTotal steps taken: %zu%s\n", COLOR_STATUS, state.history.size, COLOR_RESET);
+      printf("%sMove history: %.*s%s\n", COLOR_STATUS, (int)state.history.size, state.history.moves, COLOR_RESET);
+      delay(2000);
+      current_sequence_index++;
+      printf("\n");
+      if (current_sequence_index >= level_sequence.count) {
+        printf(custom_selection ? "Congratulations! You completed the selected levels.\n" : "Congratulations! You completed all levels.\n");
+        break;
+      }
+      current_level_index = level_sequence.levels[current_sequence_index];
+      reset_board_render_state(&render_state);
+      if (!load_terminal_level(&state, level_file->filename[0], current_level_index)) {
+        fprintf(stderr, "Error loading level %zu from %s\n", current_level_index + 1, level_file->filename[0]);
+        goto cleanup;
+      }
+      print_board(&state, &render_state);
     }
   }
 
+  exit_code = EXIT_SUCCESS;
+
+cleanup:
+
 #ifndef _WIN32
-  disable_raw_mode();
+  if (raw_mode_enabled) {
+    disable_raw_mode();
+  }
 #endif
 
-  clear_move_history(&state.history);
-  return EXIT_SUCCESS;
+  if (history_initialized) {
+    clear_move_history(&state.history);
+  }
+  clear_level_sequence(&level_sequence);
+  arg_freetable(argtable, sizeof(argtable) / sizeof(argtable[0]));
+  return exit_code;
 }

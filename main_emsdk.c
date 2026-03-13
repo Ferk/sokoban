@@ -1,41 +1,35 @@
+#include "level_parser.h"
 #include "sokoban.h"
 #include <emscripten/emscripten.h>
+#include <limits.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 // Global game state object
 GameState game_state;
+static bool web_history_initialized = false;
 
-void load_level_from_string(const char *level_string) {
-  game_state.rows = 0;
-  game_state.cols = 0;
-  game_state.event.type = EVENT_NONE;
-  int row = 0, col = 0;
-  for (const char *p = level_string; *p != '\0'; p++) {
-    if (*p == '\n') {
-      game_state.rows++;
-      if (col > game_state.cols) {
-        game_state.cols = col;
-      }
-      col = 0;
-      row++;
-      if (game_state.rows >= MAX_ROWS) break;
-      continue;
-    }
-    if (*p == PLAYER || *p == PLAYER_ON_GOAL || *p == PLAYER_ON_ICE) {
-      game_state.player_row = row;
-      game_state.player_col = col;
-    }
-    game_state.board[row][col] = *p;
-    col++;
+static bool ensure_web_history_initialized(void) {
+  if (!web_history_initialized) {
+    init_move_history(&game_state.history);
+    web_history_initialized = true;
   }
-  // Final check for the last row if there's no trailing newline
-  if (col > game_state.cols) {
-    game_state.cols = col;
+
+  return game_state.history.moves != NULL;
+}
+
+static bool load_web_level(const char *level_data, size_t level_index) {
+  if (level_data == NULL || !ensure_web_history_initialized()) {
+    return false;
   }
-  game_state.rows++;
-  printf("%dx%d level initialized!\n%s\n", game_state.rows, game_state.cols, level_string);
+  if (!load_level_from_string_at_index(&game_state, level_data, level_index)) {
+    return false;
+  }
+
+  remember_initial_state(&game_state);
+  game_state.history.size = 0;
+  return true;
 }
 
 void sokoban_reset_web(void) {
@@ -45,9 +39,27 @@ void sokoban_reset_web(void) {
 // Exported functions for JavaScript to call
 EMSCRIPTEN_KEEPALIVE
 void sokoban_init_web(const char *level_data) {
-  init_move_history(&game_state.history);
-  load_level_from_string(level_data);
-  remember_initial_state(&game_state);
+  if (!load_web_level(level_data, 0)) {
+    fprintf(stderr, "Error parsing web level data.\n");
+  }
+}
+
+EMSCRIPTEN_KEEPALIVE
+bool sokoban_init_web_level(const char *level_data, int level_index) {
+  if (level_index < 0) {
+    return false;
+  }
+  return load_web_level(level_data, (size_t)level_index);
+}
+
+EMSCRIPTEN_KEEPALIVE
+int sokoban_count_levels_web(const char *level_data) {
+  size_t count = 0;
+
+  if (!count_sok_levels_in_string(level_data, &count) || count > (size_t)INT_MAX) {
+    return -1;
+  }
+  return (int)count;
 }
 
 EMSCRIPTEN_KEEPALIVE
