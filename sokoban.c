@@ -7,6 +7,7 @@
 
 /* How many history items would be allocated each time */
 #define HISTORY_ALLOCATION_INCREMENT 16
+#define MAX_PATH_CELLS (MAX_ROWS * MAX_COLS)
 
 #define IS_WALL(x, y) (x < 0 || x >= state->rows || y < 0 || y >= state->cols || state->board[x][y] == WALL)
 #define IS_BOX(x, y) ((state->board[x][y] == BOX) || (state->board[x][y] == BOX_ON_GOAL) || (state->board[x][y] == BOX_ON_ICE))
@@ -40,9 +41,28 @@ static bool ensure_history_capacity(MoveHistory *history, size_t needed_size) {
   return true;
 }
 
+// Checks whether a tile is an empty non-sliding space that pathfinding may cross.
+static bool is_path_floor_tile(char tile) {
+  return tile == FLOOR || tile == GOAL;
+}
+
+// Checks whether a tile currently contains the player.
+static bool is_player_tile(char tile) {
+  return tile == PLAYER || tile == PLAYER_ON_GOAL || tile == PLAYER_ON_ICE;
+}
+
 // Appends one encoded move to the history buffer.
 static void append_move(MoveHistory *history, char move) {
   history->moves[history->size++] = move;
+}
+
+// Encodes a movement delta as the web/frontend input character for that step.
+static char encode_input_step(int dr, int dc) {
+  if (dr == -1) return 'w';
+  if (dr == 1) return 's';
+  if (dc == -1) return 'a';
+  if (dc == 1) return 'd';
+  return '\0';
 }
 
 // Encodes a move direction and push flag into the compact history format.
@@ -194,6 +214,137 @@ bool load_level_from_string_at_index(GameState *state, const char *level_data, s
   }
 
   apply_level_state(state, &level);
+  return true;
+}
+
+// Plans a tap/click action to a tile using direct adjacent steps or a fixed-size BFS over empty ground tiles.
+bool plan_player_action_to_tile(GameState *state, int target_row, int target_col, char *moves, size_t moves_capacity, size_t *out_move_count) {
+  static const int row_steps[4] = {-1, 1, 0, 0};
+  static const int col_steps[4] = {0, 0, -1, 1};
+  bool visited[MAX_ROWS][MAX_COLS] = {{false}};
+  signed char previous_row[MAX_ROWS][MAX_COLS];
+  signed char previous_col[MAX_ROWS][MAX_COLS];
+  char previous_move[MAX_ROWS][MAX_COLS];
+  unsigned char queue_rows[MAX_PATH_CELLS];
+  unsigned char queue_cols[MAX_PATH_CELLS];
+  char target_tile = '\0';
+  size_t queue_head = 0;
+  size_t queue_tail = 0;
+  size_t move_count = 0;
+  int row = 0;
+  int col = 0;
+
+  if (state == NULL || moves == NULL || out_move_count == NULL || moves_capacity == 0) {
+    return false;
+  }
+
+  moves[0] = '\0';
+  *out_move_count = 0;
+
+  if (target_row < 0 || target_row >= state->rows || target_col < 0 || target_col >= state->cols) {
+    return false;
+  }
+
+  target_tile = state->board[target_row][target_col];
+  if (is_player_tile(target_tile)) {
+    return true;
+  }
+
+  {
+    int dr = target_row - state->player_row;
+    int dc = target_col - state->player_col;
+
+    if ((dr == 0 && (dc == -1 || dc == 1)) || (dc == 0 && (dr == -1 || dr == 1))) {
+      char move = encode_input_step(dr, dc);
+
+      if (move != '\0' && moves_capacity >= 2) {
+        moves[0] = move;
+        moves[1] = '\0';
+        *out_move_count = 1;
+        return true;
+      }
+    }
+  }
+
+  if (!is_path_floor_tile(target_tile)) {
+    return false;
+  }
+
+  for (row = 0; row < MAX_ROWS; row++) {
+    for (col = 0; col < MAX_COLS; col++) {
+      previous_row[row][col] = -1;
+      previous_col[row][col] = -1;
+      previous_move[row][col] = '\0';
+    }
+  }
+
+  visited[state->player_row][state->player_col] = true;
+  queue_rows[queue_tail] = (unsigned char)state->player_row;
+  queue_cols[queue_tail] = (unsigned char)state->player_col;
+  queue_tail++;
+
+  while (queue_head < queue_tail && !visited[target_row][target_col]) {
+    int current_row = (int)queue_rows[queue_head];
+    int current_col = (int)queue_cols[queue_head];
+    queue_head++;
+
+    for (size_t direction = 0; direction < 4; direction++) {
+      int next_row = current_row + row_steps[direction];
+      int next_col = current_col + col_steps[direction];
+      char next_tile = '\0';
+
+      if (next_row < 0 || next_row >= state->rows || next_col < 0 || next_col >= state->cols) {
+        continue;
+      }
+      if (visited[next_row][next_col]) {
+        continue;
+      }
+
+      next_tile = state->board[next_row][next_col];
+      if (!is_path_floor_tile(next_tile)) {
+        continue;
+      }
+
+      visited[next_row][next_col] = true;
+      previous_row[next_row][next_col] = (signed char)current_row;
+      previous_col[next_row][next_col] = (signed char)current_col;
+      previous_move[next_row][next_col] = encode_input_step(row_steps[direction], col_steps[direction]);
+      queue_rows[queue_tail] = (unsigned char)next_row;
+      queue_cols[queue_tail] = (unsigned char)next_col;
+      queue_tail++;
+    }
+  }
+
+  if (!visited[target_row][target_col]) {
+    return false;
+  }
+
+  row = target_row;
+  col = target_col;
+  while (row != state->player_row || col != state->player_col) {
+    int prior_row = (int)previous_row[row][col];
+    int prior_col = (int)previous_col[row][col];
+
+    if (prior_row < 0 || prior_col < 0 || move_count + 1 >= moves_capacity) {
+      moves[0] = '\0';
+      *out_move_count = 0;
+      return false;
+    }
+
+    moves[move_count++] = previous_move[row][col];
+    row = prior_row;
+    col = prior_col;
+  }
+
+  for (size_t i = 0; i < move_count / 2; i++) {
+    char swap = moves[i];
+
+    moves[i] = moves[move_count - 1 - i];
+    moves[move_count - 1 - i] = swap;
+  }
+
+  moves[move_count] = '\0';
+  *out_move_count = move_count;
   return true;
 }
 

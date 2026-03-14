@@ -2,7 +2,7 @@
 CC = gcc
 EMCC = emcc
 CFLAGS = -Wall -Wextra -pedantic -std=c11
-EMCCFLAGS = -s EXPORTED_FUNCTIONS="['_sokoban_init_web', '_sokoban_init_web_level', '_sokoban_count_levels_web', '_sokoban_get_level_title_web', '_sokoban_get_level_description_web', '_sokoban_get_pack_metadata_web', '_sokoban_handle_input', '_sokoban_is_event_ongoing', '_sokoban_process_event', '_sokoban_get_rows', '_sokoban_get_cols', '_sokoban_get_tile', '_sokoban_get_initial_rows_web', '_sokoban_get_initial_cols_web', '_sokoban_get_initial_tile_web', '_sokoban_is_game_won']" -s EXPORTED_RUNTIME_METHODS="['cwrap']"
+EMCCFLAGS = -s EXPORTED_FUNCTIONS="['_sokoban_init_web', '_sokoban_init_web_level', '_sokoban_count_levels_web', '_sokoban_get_level_title_web', '_sokoban_get_level_description_web', '_sokoban_get_pack_metadata_web', '_sokoban_handle_input', '_sokoban_plan_tap_path_web', '_sokoban_is_event_ongoing', '_sokoban_process_event', '_sokoban_get_rows', '_sokoban_get_cols', '_sokoban_get_move_count_web', '_sokoban_get_tile', '_sokoban_get_initial_rows_web', '_sokoban_get_initial_cols_web', '_sokoban_get_initial_tile_web', '_sokoban_is_game_won']" -s EXPORTED_RUNTIME_METHODS="['cwrap']"
 TERMINAL_LIBS = -lm
 
 # Source files

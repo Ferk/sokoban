@@ -10,6 +10,7 @@
 GameState game_state;
 static bool web_history_initialized = false;
 static ParsedLevelInfo web_level_info = {0};
+static char web_tap_path[MAX_ROWS * MAX_COLS + 1];
 
 // Replaces the cached web metadata, taking ownership of the parsed strings.
 static void set_web_level_info(ParsedLevelInfo *info) {
@@ -133,10 +134,13 @@ bool sokoban_handle_input(char input) {
       dr = 0;
       dc = 1;
       break;
-    case 'u':
+    case 'u': {
+      size_t previous_move_count = game_state.history.size;
+
       undo_move(&game_state);
-      updated = true;
+      updated = (game_state.history.size != previous_move_count);
       break;
+    }
     case 'r':
       sokoban_reset_web();
       updated = true;
@@ -147,6 +151,18 @@ bool sokoban_handle_input(char input) {
     updated = move_player(&game_state, dr, dc);
   }
   return updated;
+}
+
+EMSCRIPTEN_KEEPALIVE
+// Plans the automated tap path or adjacent box push for a requested tile.
+const char *sokoban_plan_tap_path_web(int row, int col) {
+  size_t move_count = 0;
+
+  web_tap_path[0] = '\0';
+  if (!plan_player_action_to_tile(&game_state, row, col, web_tap_path, sizeof(web_tap_path), &move_count)) {
+    return "";
+  }
+  return web_tap_path;
 }
 
 EMSCRIPTEN_KEEPALIVE
@@ -183,6 +199,15 @@ EMSCRIPTEN_KEEPALIVE
 // Returns the initial board width for the loaded level.
 int sokoban_get_initial_cols_web(void) {
   return game_state.initial_state.cols;
+}
+
+EMSCRIPTEN_KEEPALIVE
+// Returns the current number of recorded player moves in the loaded level.
+int sokoban_get_move_count_web(void) {
+  if (game_state.history.size > (size_t)INT_MAX) {
+    return INT_MAX;
+  }
+  return (int)game_state.history.size;
 }
 
 EMSCRIPTEN_KEEPALIVE

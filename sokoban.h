@@ -63,6 +63,7 @@ bool load_level(GameState *state, FILE *file);
 bool load_level_at_index(GameState *state, FILE *file, size_t level_index);
 bool load_level_from_string(GameState *state, const char *level_data);
 bool load_level_from_string_at_index(GameState *state, const char *level_data, size_t level_index);
+bool plan_player_action_to_tile(GameState *state, int target_row, int target_col, char *moves, size_t moves_capacity, size_t *out_move_count);
 void reset_game(GameState *state);
 bool is_game_won(GameState *state);
 bool move_player(GameState *state, int dr, int dc);

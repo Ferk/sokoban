@@ -41,7 +41,7 @@
         #app-footer {
             position: relative;
             z-index: 1;
-            padding: 0.85rem 1rem;
+            padding: 0.2rem 1rem;
             background: linear-gradient(180deg, rgba(34, 48, 58, 0.97), rgba(15, 23, 28, 0.97));
             box-shadow: 0 0 0 2px rgba(7, 11, 13, 0.4);
         }
@@ -56,10 +56,19 @@
 
         #app-footer {
             display: flex;
-            align-items: center;
+            align-items: stretch;
             justify-content: space-between;
             gap: 1rem;
+            min-height: 2rem;
             border-top: 2px solid var(--panel-edge);
+        }
+
+        #footer-actions {
+            display: flex;
+            align-items: stretch;
+            align-self: stretch;
+            gap: 0.4rem;
+            flex-shrink: 0;
         }
 
         #header-main {
@@ -186,6 +195,7 @@
             background-color: var(--floor-color);
             padding: calc(var(--tile-size)/3);
             border-radius: .5rem;
+            touch-action: manipulation;
         }
 
         .tile {
@@ -197,6 +207,8 @@
             background-color: var(--floor-color);
             image-rendering: pixelated;
             image-rendering: crisp-edges;
+            user-select: none;
+            -webkit-user-select: none;
         }
 
         .tile::before,
@@ -236,9 +248,11 @@
         }
 
         #status {
+            display: flex;
+            align-items: center;
             flex: 1 1 auto;
             min-width: 0;
-            min-height: 1.25rem;
+            min-height: 0;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -254,12 +268,43 @@
         }
 
         #level-stats {
-            flex-shrink: 0;
+            display: flex;
+            align-items: center;
             color: var(--text-soft);
             white-space: nowrap;
+            min-width: 10em;
+            justify-content: center;
         }
 
         #level-stats[hidden] {
+            display: none;
+        }
+
+        #undo-button {
+            align-self: stretch;
+            min-height: 0;
+            margin: 0;
+            padding: 0 0.65rem;
+            border: 1px solid rgba(217, 164, 65, 0.45);
+            border-radius: 0.45rem;
+            background: rgba(11, 17, 22, 0.88);
+            color: var(--text-main);
+            cursor: pointer;
+            font: inherit;
+            line-height: 1;
+            white-space: nowrap;
+        }
+
+        #undo-button:hover {
+            background: rgba(25, 37, 46, 0.96);
+        }
+
+        #undo-button:focus-visible {
+            outline: 2px solid var(--panel-edge);
+            outline-offset: 2px;
+        }
+
+        #undo-button[hidden] {
             display: none;
         }
 
@@ -630,7 +675,10 @@
     </main>
     <footer id="app-footer">
         <div id="status">Loading runtime...</div>
-        <div id="level-stats" hidden></div>
+        <div id="footer-actions">
+            <button id="undo-button" type="button" title="Undo last move (double press to rewind)" aria-label="Undo last move (double press to rewind)" hidden>⎌ Undo</button>
+            <div id="level-stats" hidden></div>
+        </div>
     </footer>
     <dialog id="pack-dialog" class="app-dialog">
         <div class="dialog-header">
@@ -652,7 +700,7 @@
                 </label>
                 <input id="pack-file-input" type="file" accept=".sok,.txt">
             </div>
-            <div class="pack-section">
+            <div id="pack-builtins-section" class="pack-section">
                 <h3>Built-In Packs</h3>
                 <div id="pack-list"></div>
             </div>
@@ -682,6 +730,7 @@
                 <section class="help-section" aria-labelledby="help-controls-heading">
                     <h3 id="help-controls-heading">Controls</h3>
                     <p>Move with the arrow keys or <code>WASD</code>. Press <code>U</code> to undo your last move and <code>R</code> to reset the current level.</p>
+                    <p>You may click/press on an empty floor to walk to that position (if possible), or on an adjaccent tile to move/push.</p>
                 </section>
                 <section class="help-section" aria-labelledby="help-tiles-heading">
                     <h3 id="help-tiles-heading">Tiles</h3>
@@ -753,922 +802,9 @@
         </div>
     </dialog>
     <script src="res/sokoban.js"></script>
-    <script>
-        const eventTickTime = 100;
-        const successDialogDelayMs = 1000;
-        const successAdvancePromptDelayMs = 1000;
-        const cameraEdgeMarginRatio = 0.2;
-
-        const pageTitleElement = document.getElementById('page-title');
-        const sourceElement = document.getElementById('source');
-        const statusElement = document.getElementById('status');
-        const levelStatsElement = document.getElementById('level-stats');
-        const headerCopyElement = document.getElementById('header-copy');
-        const helpButtonElement = document.getElementById('help-button');
-        const helpDialogElement = document.getElementById('help-dialog');
-        const packButtonElement = document.getElementById('pack-button');
-        const packDialogElement = document.getElementById('pack-dialog');
-        const packDialogCloseElement = document.getElementById('pack-dialog-close');
-        const packUrlFormElement = document.getElementById('pack-url-form');
-        const packUrlInputElement = document.getElementById('pack-url-input');
-        const packDropzoneElement = document.getElementById('pack-dropzone');
-        const packFileInputElement = document.getElementById('pack-file-input');
-        const packListElement = document.getElementById('pack-list');
-        const packDialogMessageElement = document.getElementById('pack-dialog-message');
-        const packErrorCalloutElement = document.getElementById('pack-error-callout');
-        const packErrorDetailElement = document.getElementById('pack-error-detail');
-        const infoButtonElement = document.getElementById('info-button');
-        const infoDialogElement = document.getElementById('info-dialog');
-        const infoDialogTitleElement = document.getElementById('info-dialog-title');
-        const infoContentElement = document.getElementById('info-content');
-        const successDialogElement = document.getElementById('success-dialog');
-        const successDialogTitleElement = document.getElementById('success-dialog-title');
-        const successTimeElement = document.getElementById('success-time');
-        const successMovesElement = document.getElementById('success-moves');
-        const successMessageElement = document.getElementById('success-message');
-        const boardViewportElement = document.getElementById('board-viewport');
-        const boardElement = document.getElementById('game-board');
-
-        /* :::::::::::::::::::::::::::::: */
-        /* ::        Level packs       :: */
-        /* :::::::::::::::::::::::::::::: */
-        const builtInPacks = [
-            {
-                label: 'Tutorial',
-                url: 'levels/test.sok',
-                description: 'A set of levels introducing new elements'
-            },
-            {
-                label: 'Microban',
-                url: 'levels/microban.sok',
-                description: 'Small sized set of sokoban levels by David W Skinner.'
-            },
-            {
-                label: 'Novoban',
-                url: 'levels/novoban.sok',
-                description: 'Beginer friendly levels by François Marques.'
-            },
-            {
-                label: 'YASC sample',
-                url: 'levels/yasc-sample.sok',
-                description: 'Sample sokoban level pack from YASC.'
-            },
-        ];
-
-        let c_sokoban_init_level;
-        let c_sokoban_count_levels;
-        let c_sokoban_get_level_title;
-        let c_sokoban_get_level_description;
-        let c_sokoban_get_pack_metadata;
-        let c_sokoban_handle_input;
-        let c_sokoban_is_event_ongoing;
-        let c_sokoban_process_event;
-        let c_sokoban_get_rows;
-        let c_sokoban_get_cols;
-        let c_sokoban_get_tile;
-        let c_sokoban_get_initial_rows;
-        let c_sokoban_get_initial_cols;
-        let c_sokoban_get_initial_tile;
-        let c_sokoban_is_game_won;
-
-        let packText = '';
-        let packLabel = 'Loading pack...';
-        let packUrl = '';
-        let currentLevelIndex = 0;
-        let totalLevels = 1;
-        let gameReady = false;
-        let loadingLevel = false;
-        let levelTimerInterval = null;
-        let successDialogTimer = null;
-        let successPromptTimer = null;
-        let currentPlayerTile = null;
-        let currentLevelTitle = '';
-        let currentLevelDescription = '';
-        let currentPackMetadata = '';
-        let currentMoveCount = 0;
-        let firstMoveTimestamp = null;
-        let awaitingAdvanceAfterWin = false;
-        let gameplayFocusTimer = null;
-
-        function clearCurrentLevelInfo() {
-            currentLevelTitle = '';
-            currentLevelDescription = '';
-            currentPackMetadata = '';
-        }
-
-        function syncCurrentLevelInfoFromRuntime() {
-            currentLevelTitle = c_sokoban_get_level_title();
-            currentLevelDescription = c_sokoban_get_level_description();
-            currentPackMetadata = c_sokoban_get_pack_metadata();
-        }
-
-        function setStatus(message, tone = '') {
-            statusElement.textContent = message;
-            statusElement.title = message;
-            statusElement.className = tone;
-        }
-
-        function formatElapsedTime(elapsedMs) {
-            const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
-            const hours = Math.floor(totalSeconds / 3600);
-            const minutes = Math.floor((totalSeconds % 3600) / 60);
-            const seconds = totalSeconds % 60;
-
-            if (hours > 0) {
-                return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-            }
-
-            return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-        }
-
-        function formatMoveCount(moveCount) {
-            return `${moveCount} move${moveCount === 1 ? '' : 's'}`;
-        }
-
-        function refreshLevelStats() {
-            if (firstMoveTimestamp === null) {
-                levelStatsElement.hidden = true;
-                levelStatsElement.textContent = '';
-                levelStatsElement.title = '';
-                return;
-            }
-
-            const elapsedTime = formatElapsedTime(Date.now() - firstMoveTimestamp);
-            const moveLabel = formatMoveCount(currentMoveCount);
-
-            levelStatsElement.hidden = false;
-            levelStatsElement.textContent = `${elapsedTime} · ${moveLabel}`;
-            levelStatsElement.title = `Time ${elapsedTime}, ${moveLabel}`;
-        }
-
-        function stopLevelTimer() {
-            if (levelTimerInterval !== null) {
-                window.clearInterval(levelTimerInterval);
-                levelTimerInterval = null;
-            }
-        }
-
-        function clearSuccessDialogTimer() {
-            if (successDialogTimer !== null) {
-                window.clearTimeout(successDialogTimer);
-                successDialogTimer = null;
-            }
-        }
-
-        function clearSuccessPromptTimer() {
-            if (successPromptTimer !== null) {
-                window.clearTimeout(successPromptTimer);
-                successPromptTimer = null;
-            }
-        }
-
-        function clearGameplayFocusTimer() {
-            if (gameplayFocusTimer !== null) {
-                window.clearTimeout(gameplayFocusTimer);
-                gameplayFocusTimer = null;
-            }
-        }
-
-        function isModalDialogOpen() {
-            return infoDialogElement.open || helpDialogElement.open || packDialogElement.open || successDialogElement.open;
-        }
-
-        function focusGameplaySurface() {
-            clearGameplayFocusTimer();
-            if (document.hidden || !gameReady || loadingLevel || isModalDialogOpen()) {
-                return false;
-            }
-
-            try {
-                boardViewportElement.focus({ preventScroll: true });
-            } catch (error) {
-                boardViewportElement.focus();
-            }
-            return true;
-        }
-
-        function scheduleGameplayFocusRestore() {
-            clearGameplayFocusTimer();
-            gameplayFocusTimer = window.setTimeout(() => {
-                gameplayFocusTimer = null;
-                focusGameplaySurface();
-            }, 0);
-        }
-
-        function startLevelStatsIfNeeded() {
-            if (firstMoveTimestamp !== null) {
-                return;
-            }
-
-            firstMoveTimestamp = Date.now();
-            refreshLevelStats();
-            levelTimerInterval = window.setInterval(refreshLevelStats, 1000);
-        }
-
-        function resetLevelStats() {
-            currentMoveCount = 0;
-            firstMoveTimestamp = null;
-            awaitingAdvanceAfterWin = false;
-            clearSuccessDialogTimer();
-            clearSuccessPromptTimer();
-            clearGameplayFocusTimer();
-            stopLevelTimer();
-            refreshLevelStats();
-            successMessageElement.dataset.visible = 'false';
-            closeDialogIfOpen(successDialogElement);
-        }
-
-        function showSuccessDialog() {
-            const hasNextLevel = currentLevelIndex + 1 < totalLevels;
-            const elapsedMs = firstMoveTimestamp === null ? 0 : Date.now() - firstMoveTimestamp;
-
-            successDialogTimer = null;
-            awaitingAdvanceAfterWin = false;
-            clearSuccessPromptTimer();
-            stopLevelTimer();
-            if (firstMoveTimestamp !== null) {
-                levelStatsElement.hidden = false;
-                levelStatsElement.textContent = `${formatElapsedTime(elapsedMs)} · ${formatMoveCount(currentMoveCount)}`;
-                levelStatsElement.title = `Time ${formatElapsedTime(elapsedMs)}, ${formatMoveCount(currentMoveCount)}`;
-            }
-            successDialogTitleElement.textContent = hasNextLevel ? `Level ${currentLevelIndex + 1} Complete` : 'All Levels Complete';
-            successTimeElement.textContent = formatElapsedTime(elapsedMs);
-            successMovesElement.textContent = String(currentMoveCount);
-            successMessageElement.textContent = hasNextLevel ? 'Press any key to go to the next level.' : 'Press any key to close.';
-            successMessageElement.dataset.visible = 'false';
-            closeDialogIfOpen(infoDialogElement);
-            closeDialogIfOpen(helpDialogElement);
-            closeDialogIfOpen(packDialogElement);
-            if (!successDialogElement.open) {
-                successDialogElement.showModal();
-            }
-            successPromptTimer = window.setTimeout(() => {
-                successPromptTimer = null;
-                awaitingAdvanceAfterWin = true;
-                successMessageElement.dataset.visible = 'true';
-            }, successAdvancePromptDelayMs);
-        }
-
-        function scheduleSuccessDialog() {
-            if (successDialogTimer !== null || successDialogElement.open) {
-                return;
-            }
-
-            successDialogTimer = window.setTimeout(() => {
-                showSuccessDialog();
-            }, successDialogDelayMs);
-        }
-
-        function advanceAfterWin() {
-            if (!awaitingAdvanceAfterWin) {
-                return;
-            }
-
-            awaitingAdvanceAfterWin = false;
-            closeDialogIfOpen(successDialogElement);
-            if (currentLevelIndex + 1 < totalLevels) {
-                loadLevel(currentLevelIndex + 1);
-            }
-        }
-
-        function refreshHeader() {
-            const levelLabel = totalLevels > 1 ? `Level ${currentLevelIndex + 1} / ${totalLevels}` : 'Single level';
-            pageTitleElement.textContent = packLabel;
-            sourceElement.textContent = levelLabel;
-            sourceElement.title = packUrl;
-        }
-
-        function buildInfoTextBlock(text, emptyText) {
-            const paragraph = document.createElement('p');
-            const content = text.trim();
-
-            paragraph.className = 'info-text-block';
-            if (content === '') {
-                paragraph.classList.add('is-empty');
-                paragraph.textContent = emptyText;
-            } else {
-                paragraph.textContent = content;
-            }
-            return paragraph;
-        }
-
-        function applyTileAppearance(tileElement, tileChar) {
-            let hasPlayer = false;
-
-            switch (tileChar) {
-                case '#':
-                    tileElement.classList.add('base-wall');
-                    break;
-                case '@':
-                    tileElement.classList.add('overlay-player');
-                    hasPlayer = true;
-                    break;
-                case '+':
-                    tileElement.classList.add('base-goal', 'overlay-player');
-                    hasPlayer = true;
-                    break;
-                case '&':
-                    tileElement.classList.add('base-ice', 'overlay-player');
-                    hasPlayer = true;
-                    break;
-                case '$':
-                    tileElement.classList.add('overlay-box');
-                    break;
-                case '*':
-                    tileElement.classList.add('base-goal', 'overlay-box');
-                    break;
-                case '"':
-                    tileElement.classList.add('base-ice', 'overlay-box');
-                    break;
-                case '.':
-                    tileElement.classList.add('base-goal');
-                    break;
-                case '~':
-                    tileElement.classList.add('base-ice');
-                    break;
-            }
-
-            return hasPlayer;
-        }
-
-        function buildInfoBoardPreview() {
-            const rows = c_sokoban_get_initial_rows();
-            const cols = c_sokoban_get_initial_cols();
-            const previewBoard = document.createElement('div');
-            const fragment = document.createDocumentFragment();
-
-            previewBoard.className = 'info-board-preview';
-            previewBoard.style.setProperty('--cols', cols);
-
-            for (let row = 0; row < rows; row++) {
-                for (let col = 0; col < cols; col++) {
-                    const tileChar = String.fromCharCode(c_sokoban_get_initial_tile(row, col));
-                    const tileDiv = document.createElement('div');
-
-                    tileDiv.classList.add('tile');
-                    applyTileAppearance(tileDiv, tileChar);
-                    fragment.appendChild(tileDiv);
-                }
-            }
-
-            previewBoard.appendChild(fragment);
-            return previewBoard;
-        }
-
-        function refreshLevelInfo() {
-            const hasInfo = gameReady;
-            const dialogTitle = totalLevels > 1 ? `${packLabel} - Level ${currentLevelIndex + 1} information` : `${packLabel} information`;
-            const levelTitle = currentLevelTitle.trim() !== '' ? currentLevelTitle.trim() : (totalLevels > 1 ? `Level ${currentLevelIndex + 1}` : packLabel);
-            const contentFragment = document.createDocumentFragment();
-            const titleElement = document.createElement('h3');
-            const separatorElement = document.createElement('div');
-
-            infoButtonElement.hidden = !hasInfo;
-            headerCopyElement.dataset.clickable = hasInfo ? 'true' : 'false';
-            headerCopyElement.setAttribute('aria-disabled', hasInfo ? 'false' : 'true');
-            headerCopyElement.tabIndex = hasInfo ? 0 : -1;
-            infoDialogTitleElement.textContent = dialogTitle;
-            infoContentElement.replaceChildren();
-
-            if (!hasInfo) {
-                if (infoDialogElement.open) {
-                    infoDialogElement.close();
-                }
-                return;
-            }
-
-            titleElement.className = 'info-level-title';
-            titleElement.textContent = levelTitle;
-            separatorElement.className = 'info-divider';
-
-            contentFragment.appendChild(titleElement);
-            contentFragment.appendChild(buildInfoTextBlock(currentLevelDescription, 'No level description available.'));
-            contentFragment.appendChild(buildInfoBoardPreview());
-            contentFragment.appendChild(separatorElement);
-            contentFragment.appendChild(buildInfoTextBlock(currentPackMetadata, 'No level pack information available.'));
-            infoContentElement.appendChild(contentFragment);
-        }
-
-        function refreshStatus() {
-            if (!gameReady) {
-                return;
-            }
-            if (loadingLevel) {
-                setStatus(`Loading level ${currentLevelIndex + 1}...`);
-                return;
-            }
-            if (c_sokoban_is_game_won()) {
-                if (currentLevelIndex + 1 < totalLevels) {
-                    setStatus(`Level ${currentLevelIndex + 1} complete!`, 'success');
-                } else {
-                    setStatus(`Congratulations! You completed all ${totalLevels} levels.`, 'success');
-                }
-                return;
-            }
-            if (totalLevels > 1) {
-                setStatus(`Ready. Level ${currentLevelIndex + 1} of ${totalLevels}.`);
-            } else {
-                setStatus('Ready.');
-            }
-        }
-
-        function setPackDialogMessage(message = '') {
-            packDialogMessageElement.textContent = message;
-        }
-
-        function showPackErrorCallout(message = '') {
-            packErrorDetailElement.textContent = message;
-            packErrorCalloutElement.hidden = false;
-        }
-
-        function hidePackErrorCallout() {
-            packErrorDetailElement.textContent = '';
-            packErrorCalloutElement.hidden = true;
-        }
-
-        function closeDialogIfOpen(dialog) {
-            if (dialog.open) {
-                dialog.close();
-            }
-        }
-
-        function closeDialogOnBackdrop(dialog) {
-            dialog.addEventListener('click', event => {
-                if (event.target === dialog) {
-                    dialog.close();
-                }
-            });
-        }
-
-        function openPackDialog() {
-            closeDialogIfOpen(infoDialogElement);
-            closeDialogIfOpen(helpDialogElement);
-            setPackDialogMessage('');
-            packUrlInputElement.value = new URL(window.location.href).searchParams.get('l') || '';
-            packDialogElement.showModal();
-            packUrlInputElement.focus();
-        }
-
-        function openHelpDialog() {
-            closeDialogIfOpen(packDialogElement);
-            closeDialogIfOpen(infoDialogElement);
-            helpDialogElement.showModal();
-        }
-
-        function openInfoDialog() {
-            if (infoButtonElement.hidden) {
-                return;
-            }
-
-            closeDialogIfOpen(packDialogElement);
-            closeDialogIfOpen(helpDialogElement);
-            infoDialogElement.showModal();
-        }
-
-        function clamp(value, min, max) {
-            return Math.min(Math.max(value, min), max);
-        }
-
-        function updateCamera(forceCenter = false) {
-            if (currentPlayerTile === null || boardElement.firstElementChild === null) {
-                return;
-            }
-
-            const viewportRect = boardViewportElement.getBoundingClientRect();
-            const playerRect = currentPlayerTile.getBoundingClientRect();
-            const viewportWidth = boardViewportElement.clientWidth;
-            const viewportHeight = boardViewportElement.clientHeight;
-            const currentScrollLeft = boardViewportElement.scrollLeft;
-            const currentScrollTop = boardViewportElement.scrollTop;
-            const maxScrollLeft = Math.max(0, boardViewportElement.scrollWidth - viewportWidth);
-            const maxScrollTop = Math.max(0, boardViewportElement.scrollHeight - viewportHeight);
-            const playerVisibleX = playerRect.left - viewportRect.left + playerRect.width / 2;
-            const playerVisibleY = playerRect.top - viewportRect.top + playerRect.height / 2;
-            const playerContentX = currentScrollLeft + playerVisibleX;
-            const playerContentY = currentScrollTop + playerVisibleY;
-            const marginX = viewportWidth * cameraEdgeMarginRatio;
-            const marginY = viewportHeight * cameraEdgeMarginRatio;
-            const safeLeft = currentScrollLeft + marginX;
-            const safeRight = currentScrollLeft + viewportWidth - marginX;
-            const safeTop = currentScrollTop + marginY;
-            const safeBottom = currentScrollTop + viewportHeight - marginY;
-            let nextScrollLeft = currentScrollLeft;
-            let nextScrollTop = currentScrollTop;
-
-            if (forceCenter) {
-                nextScrollLeft = playerContentX - viewportWidth / 2;
-                nextScrollTop = playerContentY - viewportHeight / 2;
-            } else {
-                if (playerContentX < safeLeft) {
-                    nextScrollLeft = playerContentX - marginX;
-                } else if (playerContentX > safeRight) {
-                    nextScrollLeft = playerContentX - (viewportWidth - marginX);
-                }
-
-                if (playerContentY < safeTop) {
-                    nextScrollTop = playerContentY - marginY;
-                } else if (playerContentY > safeBottom) {
-                    nextScrollTop = playerContentY - (viewportHeight - marginY);
-                }
-            }
-
-            nextScrollLeft = clamp(nextScrollLeft, 0, maxScrollLeft);
-            nextScrollTop = clamp(nextScrollTop, 0, maxScrollTop);
-
-            if (Math.abs(nextScrollLeft - currentScrollLeft) > 0.5) {
-                boardViewportElement.scrollLeft = nextScrollLeft;
-            }
-            if (Math.abs(nextScrollTop - currentScrollTop) > 0.5) {
-                boardViewportElement.scrollTop = nextScrollTop;
-            }
-        }
-
-        function drawBoard(forceCenter = false) {
-            const rows = c_sokoban_get_rows();
-            const cols = c_sokoban_get_cols();
-            const fragment = document.createDocumentFragment();
-
-            currentPlayerTile = null;
-            boardElement.innerHTML = '';
-            boardElement.style.setProperty('--cols', cols);
-
-            for (let row = 0; row < rows; row++) {
-                for (let col = 0; col < cols; col++) {
-                    const tileChar = String.fromCharCode(c_sokoban_get_tile(row, col));
-                    const tileDiv = document.createElement('div');
-
-                    tileDiv.classList.add('tile');
-                    const hasPlayer = applyTileAppearance(tileDiv, tileChar);
-                    if (hasPlayer) {
-                        currentPlayerTile = tileDiv;
-                    }
-
-                    fragment.appendChild(tileDiv);
-                }
-            }
-
-            boardElement.appendChild(fragment);
-            refreshHeader();
-            refreshStatus();
-            window.requestAnimationFrame(() => updateCamera(forceCenter));
-        }
-
-        function applyPackToUrl(levelUrl) {
-            const nextUrl = new URL(window.location.href);
-
-            nextUrl.searchParams.set('l', levelUrl);
-            window.location.assign(nextUrl.toString());
-        }
-
-        function findBuiltInPackByUrl(levelUrl) {
-            return builtInPacks.find(pack => pack.url === levelUrl) || null;
-        }
-
-        async function fetchPackFromUrl(levelUrl, labelHint = '') {
-            const resolvedUrl = new URL(levelUrl, window.location.href);
-            const response = await fetch(resolvedUrl);
-
-            if (!response.ok) {
-                throw new Error(`Could not load ${resolvedUrl.href} (HTTP ${response.status}).`);
-            }
-
-            return {
-                text: await response.text(),
-                label: labelHint || resolvedUrl.pathname.split('/').pop() || resolvedUrl.href,
-                url: resolvedUrl.href
-            };
-        }
-
-        async function activatePack(loadedPack, clearUrlParam = false) {
-            const detectedLevels = c_sokoban_count_levels(loadedPack.text);
-
-            if (detectedLevels <= 0) {
-                throw new Error('No valid Sokoban levels were found.');
-            }
-
-            packText = loadedPack.text;
-            packLabel = loadedPack.label;
-            packUrl = loadedPack.url;
-            totalLevels = detectedLevels;
-            currentLevelIndex = 0;
-
-            if (clearUrlParam) {
-                const nextUrl = new URL(window.location.href);
-
-                nextUrl.searchParams.delete('l');
-                window.history.replaceState(null, '', nextUrl.toString());
-            }
-
-            if (!loadLevel(0)) {
-                throw new Error('The first level could not be loaded.');
-            }
-        }
-
-        async function loadLocalPackFile(file) {
-            if (!file) {
-                return;
-            }
-
-            try {
-                setPackDialogMessage('Loading local file...');
-                await activatePack(
-                    {
-                        text: await file.text(),
-                        label: file.name,
-                        url: ''
-                    },
-                    true
-                );
-                packDialogElement.close();
-                setPackDialogMessage('');
-            } catch (error) {
-                setPackDialogMessage(error.message);
-                if (!gameReady) {
-                    showPackErrorCallout(error.message);
-                }
-            }
-        }
-
-        function loadLevel(levelIndex) {
-            resetLevelStats();
-            loadingLevel = true;
-            currentLevelIndex = levelIndex;
-            refreshHeader();
-            refreshStatus();
-
-            if (!c_sokoban_init_level(packText, levelIndex)) {
-                loadingLevel = false;
-                gameReady = false;
-                clearCurrentLevelInfo();
-                refreshLevelInfo();
-                showPackErrorCallout(`The current pack could not load level ${levelIndex + 1}.`);
-                setStatus(`Could not load level ${levelIndex + 1}.`, 'error');
-                return false;
-            }
-
-            syncCurrentLevelInfoFromRuntime();
-            loadingLevel = false;
-            gameReady = true;
-            refreshLevelInfo();
-            hidePackErrorCallout();
-            drawBoard(true);
-            scheduleGameplayFocusRestore();
-            return true;
-        }
-
-        function maybeAdvanceLevel() {
-            if (!gameReady || !c_sokoban_is_game_won()) {
-                refreshStatus();
-                return;
-            }
-            if (awaitingAdvanceAfterWin || successDialogTimer !== null || successDialogElement.open) {
-                return;
-            }
-
-            scheduleSuccessDialog();
-        }
-
-        function handleEventProgression() {
-            if (c_sokoban_process_event()) {
-                drawBoard();
-            }
-            if (c_sokoban_is_event_ongoing()) {
-                window.setTimeout(handleEventProgression, eventTickTime);
-                return;
-            }
-            maybeAdvanceLevel();
-        }
-
-        async function loadRequestedPack() {
-            const levelParam = new URLSearchParams(window.location.search).get('l');
-
-            if (levelParam === null) {
-                if (builtInPacks.length === 0) {
-                    throw new Error('No built-in level packs are configured.');
-                }
-                return fetchPackFromUrl(builtInPacks[0].url, builtInPacks[0].label);
-            }
-            if (levelParam.trim() === '') {
-                throw new Error("The 'l' query parameter is empty.");
-            }
-
-            const builtInPack = findBuiltInPackByUrl(levelParam);
-            return fetchPackFromUrl(levelParam, builtInPack ? builtInPack.label : '');
-        }
-
-        async function initGame() {
-            try {
-                setStatus('Loading levels...');
-                resetLevelStats();
-                hidePackErrorCallout();
-                await activatePack(await loadRequestedPack());
-            } catch (error) {
-                boardElement.innerHTML = '';
-                sourceElement.textContent = '';
-                pageTitleElement.textContent = 'Load error';
-                gameReady = false;
-                clearCurrentLevelInfo();
-                resetLevelStats();
-                refreshLevelInfo();
-                showPackErrorCallout(error.message);
-                setStatus(error.message, 'error');
-                console.error(error);
-            }
-        }
-
-        function getInputCharForKey(key) {
-            const normalizedKey = key.length === 1 ? key.toLowerCase() : key;
-
-            switch (normalizedKey) {
-                case 'ArrowUp':
-                case 'w':
-                    return 'w';
-                case 'ArrowDown':
-                case 's':
-                    return 's';
-                case 'ArrowLeft':
-                case 'a':
-                    return 'a';
-                case 'ArrowRight':
-                case 'd':
-                    return 'd';
-                case 'u':
-                    return 'u';
-                case 'r':
-                    return 'r';
-                default:
-                    return '';
-            }
-        }
-
-        function handleKeyPress(event) {
-            if (successDialogElement.open) {
-                if (event.metaKey || event.ctrlKey || event.altKey || event.key === 'Shift') {
-                    return;
-                }
-                event.preventDefault();
-                if (awaitingAdvanceAfterWin) {
-                    advanceAfterWin();
-                }
-                return;
-            }
-
-            const inputChar = getInputCharForKey(event.key);
-            const isMoveInput = inputChar === 'w' || inputChar === 'a' || inputChar === 's' || inputChar === 'd';
-
-            if (inputChar === '') {
-                return;
-            }
-            if (infoDialogElement.open || helpDialogElement.open || packDialogElement.open) {
-                return;
-            }
-
-            event.preventDefault();
-
-            if (!gameReady || loadingLevel || c_sokoban_is_event_ongoing() || c_sokoban_is_game_won()) {
-                return;
-            }
-
-            if (c_sokoban_handle_input(inputChar.charCodeAt(0))) {
-                if (inputChar === 'r') {
-                    resetLevelStats();
-                } else if (isMoveInput) {
-                    startLevelStatsIfNeeded();
-                    currentMoveCount += 1;
-                    refreshLevelStats();
-                }
-                drawBoard();
-            }
-            if (c_sokoban_is_event_ongoing()) {
-                window.setTimeout(handleEventProgression, eventTickTime);
-            } else {
-                maybeAdvanceLevel();
-            }
-        }
-
-        function bindRuntimeApi() {
-            c_sokoban_init_level = Module.cwrap('sokoban_init_web_level', 'boolean', ['string', 'number']);
-            c_sokoban_count_levels = Module.cwrap('sokoban_count_levels_web', 'number', ['string']);
-            c_sokoban_get_level_title = Module.cwrap('sokoban_get_level_title_web', 'string', []);
-            c_sokoban_get_level_description = Module.cwrap('sokoban_get_level_description_web', 'string', []);
-            c_sokoban_get_pack_metadata = Module.cwrap('sokoban_get_pack_metadata_web', 'string', []);
-            c_sokoban_handle_input = Module.cwrap('sokoban_handle_input', 'boolean', ['number']);
-            c_sokoban_is_event_ongoing = Module.cwrap('sokoban_is_event_ongoing', 'boolean', []);
-            c_sokoban_process_event = Module.cwrap('sokoban_process_event', 'boolean', []);
-            c_sokoban_get_rows = Module.cwrap('sokoban_get_rows', 'number', []);
-            c_sokoban_get_cols = Module.cwrap('sokoban_get_cols', 'number', []);
-            c_sokoban_get_tile = Module.cwrap('sokoban_get_tile', 'number', ['number', 'number']);
-            c_sokoban_get_initial_rows = Module.cwrap('sokoban_get_initial_rows_web', 'number', []);
-            c_sokoban_get_initial_cols = Module.cwrap('sokoban_get_initial_cols_web', 'number', []);
-            c_sokoban_get_initial_tile = Module.cwrap('sokoban_get_initial_tile_web', 'number', ['number', 'number']);
-            c_sokoban_is_game_won = Module.cwrap('sokoban_is_game_won', 'boolean', []);
-        }
-
-        function initializeBuiltInPackList() {
-            builtInPacks.forEach(pack => {
-                const button = document.createElement('button');
-
-                button.type = 'button';
-                button.className = 'pack-list-button';
-                button.innerHTML = `<strong>${pack.label}</strong><span>${pack.description}</span>`;
-                button.addEventListener('click', () => {
-                    applyPackToUrl(pack.url);
-                });
-                packListElement.appendChild(button);
-            });
-        }
-
-        function initializePackHandlers() {
-            packButtonElement.addEventListener('click', openPackDialog);
-            packDialogCloseElement.addEventListener('click', () => {
-                closeDialogIfOpen(packDialogElement);
-            });
-            packUrlFormElement.addEventListener('submit', event => {
-                event.preventDefault();
-                if (packUrlInputElement.value.trim() === '') {
-                    setPackDialogMessage('Enter a level pack URL first.');
-                    return;
-                }
-                applyPackToUrl(packUrlInputElement.value.trim());
-            });
-            packDropzoneElement.addEventListener('dragover', event => {
-                event.preventDefault();
-                packDropzoneElement.classList.add('dragover');
-            });
-            packDropzoneElement.addEventListener('dragleave', () => {
-                packDropzoneElement.classList.remove('dragover');
-            });
-            packDropzoneElement.addEventListener('drop', async event => {
-                const [file] = event.dataTransfer.files;
-
-                event.preventDefault();
-                packDropzoneElement.classList.remove('dragover');
-                await loadLocalPackFile(file);
-            });
-            packFileInputElement.addEventListener('change', async event => {
-                const [file] = event.target.files;
-
-                try {
-                    await loadLocalPackFile(file);
-                } finally {
-                    packFileInputElement.value = '';
-                }
-            });
-            packErrorCalloutElement.addEventListener('click', openPackDialog);
-            packErrorCalloutElement.addEventListener('keydown', event => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    openPackDialog();
-                }
-            });
-        }
-
-        function initializeDialogHandlers() {
-            helpButtonElement.addEventListener('click', openHelpDialog);
-            infoButtonElement.addEventListener('click', openInfoDialog);
-            headerCopyElement.addEventListener('click', openInfoDialog);
-            headerCopyElement.addEventListener('keydown', event => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    openInfoDialog();
-                }
-            });
-            closeDialogOnBackdrop(packDialogElement);
-            closeDialogOnBackdrop(infoDialogElement);
-            closeDialogOnBackdrop(helpDialogElement);
-            packDialogElement.addEventListener('close', scheduleGameplayFocusRestore);
-            infoDialogElement.addEventListener('close', scheduleGameplayFocusRestore);
-            helpDialogElement.addEventListener('close', scheduleGameplayFocusRestore);
-            successDialogElement.addEventListener('close', scheduleGameplayFocusRestore);
-            successDialogElement.addEventListener('cancel', event => {
-                event.preventDefault();
-            });
-        }
-
-        function initializeWindowHandlers() {
-            window.addEventListener('keydown', handleKeyPress);
-            window.addEventListener('focus', scheduleGameplayFocusRestore);
-            document.addEventListener('visibilitychange', () => {
-                if (!document.hidden) {
-                    scheduleGameplayFocusRestore();
-                }
-            });
-            window.addEventListener('resize', () => {
-                if (gameReady) {
-                    window.requestAnimationFrame(() => updateCamera(true));
-                }
-            });
-        }
-
-        Module.onRuntimeInitialized = async () => {
-            bindRuntimeApi();
-            initializeBuiltInPackList();
-            initializePackHandlers();
-            initializeDialogHandlers();
-            initializeWindowHandlers();
-            window.focusGameplaySurface = focusGameplaySurface;
-            await initGame();
-        };
-    </script>
+    <script src="app-config.js"></script>
+    <script src="app-core.js"></script>
+    <script src="app-board.js"></script>
+    <script src="app-ui.js"></script>
 </body>
 </html>
