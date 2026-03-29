@@ -23,10 +23,14 @@
 #define LOCK 'K'
 #define KEY_ON_ICE ((char)1)
 #define KEY_ON_GOAL ((char)2)
+#define SLIDER_ON_ICE ((char)3)
+#define SLIDER_ON_GOAL ((char)4)
+#define SLIDER 'V'
 
 typedef enum {
   EVENT_NONE = 0, // awaiting player input
   EVENT_ICE_MOVE, // elements sliding on ice
+  EVENT_SLIDER_MOVE, // sliders falling downward
 } GameEventType;
 
 typedef struct {

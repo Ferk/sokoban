@@ -269,6 +269,10 @@
             background-image: url("res/key.png");
         }
 
+        .tile.overlay-slider::after {
+            background-image: url("res/slider.png");
+        }
+
         #status {
             display: flex;
             align-items: center;
@@ -797,6 +801,13 @@
                             <div class="legend-copy">
                                 <strong>Key</strong>
                                 <span>Acts like a box until you try to push it, then it disappears.</span>
+                            </div>
+                        </div>
+                        <div class="help-legend-item">
+                            <span class="tile legend-tile overlay-slider" aria-hidden="true"></span>
+                            <div class="legend-copy">
+                                <strong>Slider</strong>
+                                <span>Acts like a wall, but falls downward through empty floor, ice, or goal tiles.</span>
                             </div>
                         </div>
                         <div class="help-legend-item">

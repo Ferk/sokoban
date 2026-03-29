@@ -34,11 +34,16 @@ int nanosleep(const struct timespec *req, struct timespec *rem);
 #define COLOR_BOX_ON_ICE "\033[46;93m"     // Dark cyan background, bright yellow foreground
 #define COLOR_KEY "\033[33m"               // Dark yellow foreground
 #define COLOR_KEY_ON_ICE "\033[46;33m"     // Dark cyan background, dark yellow foreground
+#define COLOR_SLIDER "\033[95m"            // Bright magenta foreground
+#define COLOR_SLIDER_ON_ICE "\033[46;95m"  // Dark cyan background, bright magenta foreground
+#define COLOR_SLIDER_ON_GOAL "\033[43;95m" // Dark yellow background, bright magenta foreground
 #define COLOR_LOCK "\033[1;30;43m"         // Grey foreground, Dark yellow background
 #define COLOR_TITLE "\033[96m"             // Bright cyan foreground
 #define COLOR_STATUS "\033[93m"            // Bright yellow foreground
 #define DISPLAY_KEY_ON_GOAL "\xE1\xB8\xB3"
 #define DISPLAY_KEY_ON_ICE "\xE1\xB8\xB5"
+#define DISPLAY_SLIDER_ON_GOAL "\xE1\xB9\xBE"
+#define DISPLAY_SLIDER_ON_ICE "\xE1\xB9\xBC"
 
 // milliseconds to wait before running a "tic" during game events
 #define TIC_DURATION_MS 100
@@ -398,6 +403,15 @@ void print_board(GameState *state, BoardRenderState *render_state) {
           break;
         case KEY_ON_ICE:
           printf("%s%s%s", COLOR_KEY_ON_ICE, DISPLAY_KEY_ON_ICE, COLOR_RESET);
+          break;
+        case SLIDER:
+          printf("%s%c%s", COLOR_SLIDER, SLIDER, COLOR_RESET);
+          break;
+        case SLIDER_ON_GOAL:
+          printf("%s%s%s", COLOR_SLIDER_ON_GOAL, DISPLAY_SLIDER_ON_GOAL, COLOR_RESET);
+          break;
+        case SLIDER_ON_ICE:
+          printf("%s%s%s", COLOR_SLIDER_ON_ICE, DISPLAY_SLIDER_ON_ICE, COLOR_RESET);
           break;
         case LOCK:
           printf("%s%c%s", COLOR_LOCK, LOCK, COLOR_RESET);

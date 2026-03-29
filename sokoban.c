@@ -9,7 +9,8 @@
 #define HISTORY_ALLOCATION_INCREMENT 16
 #define MAX_PATH_CELLS (MAX_ROWS * MAX_COLS)
 
-#define IS_WALL(x, y) (x < 0 || x >= state->rows || y < 0 || y >= state->cols || state->board[x][y] == WALL || state->board[x][y] == LOCK)
+#define IS_SLIDER(x, y) ((state->board[x][y] == SLIDER) || (state->board[x][y] == SLIDER_ON_ICE) || (state->board[x][y] == SLIDER_ON_GOAL))
+#define IS_WALL(x, y) (x < 0 || x >= state->rows || y < 0 || y >= state->cols || state->board[x][y] == WALL || state->board[x][y] == LOCK || IS_SLIDER(x, y))
 #define IS_BOX(x, y) ((state->board[x][y] == BOX) || (state->board[x][y] == BOX_ON_GOAL) || (state->board[x][y] == BOX_ON_ICE))
 #define IS_KEY(x, y) ((state->board[x][y] == KEY) || (state->board[x][y] == KEY_ON_ICE) || (state->board[x][y] == KEY_ON_GOAL))
 #define IS_PLAYER(x, y) ((state->board[x][y] == PLAYER) || (state->board[x][y] == PLAYER_ON_GOAL) || (state->board[x][y] == PLAYER_ON_ICE))
@@ -17,10 +18,12 @@
 
 #define REMOVE_BOX(x, y) state->board[x][y] = ((state->board[x][y] == BOX_ON_GOAL) ? GOAL : ((state->board[x][y] == BOX_ON_ICE) ? ICE : FLOOR))
 #define REMOVE_KEY(x, y) state->board[x][y] = ((state->board[x][y] == KEY_ON_GOAL) ? GOAL : ((state->board[x][y] == KEY_ON_ICE) ? ICE : FLOOR))
+#define REMOVE_SLIDER(x, y) state->board[x][y] = ((state->board[x][y] == SLIDER_ON_GOAL) ? GOAL : ((state->board[x][y] == SLIDER_ON_ICE) ? ICE : FLOOR))
 #define REMOVE_PLAYER(x, y) state->board[x][y] = ((state->board[x][y] == PLAYER_ON_GOAL) ? GOAL : ((state->board[x][y] == PLAYER_ON_ICE) ? ICE : FLOOR))
 
 #define ADD_BOX(x, y) state->board[x][y] = ((state->board[x][y] == GOAL) ? BOX_ON_GOAL : ((state->board[x][y] == ICE) ? BOX_ON_ICE : BOX))
 #define ADD_KEY(x, y) state->board[x][y] = ((state->board[x][y] == GOAL) ? KEY_ON_GOAL : ((state->board[x][y] == ICE) ? KEY_ON_ICE : KEY))
+#define ADD_SLIDER(x, y) state->board[x][y] = ((state->board[x][y] == GOAL) ? SLIDER_ON_GOAL : ((state->board[x][y] == ICE) ? SLIDER_ON_ICE : SLIDER))
 #define ADD_PLAYER(x, y) state->board[x][y] = ((state->board[x][y] == GOAL) ? PLAYER_ON_GOAL : ((state->board[x][y] == ICE) ? PLAYER_ON_ICE : PLAYER))
 
 // Grows the move history buffer when a new move would exceed its capacity.
@@ -98,6 +101,45 @@ static bool decode_move(char move, int *dr, int *dc) {
     default:
       return false;
   }
+}
+
+// Reports whether a slider currently has an empty tile directly beneath it.
+static bool can_slider_fall_from(GameState *state, int row, int col) {
+  char below_tile = '\0';
+
+  if (row < 0 || row >= state->rows || col < 0 || col >= state->cols || !IS_SLIDER(row, col) || row + 1 >= state->rows) {
+    return false;
+  }
+
+  below_tile = state->board[row + 1][col];
+  return below_tile == FLOOR || below_tile == GOAL || below_tile == ICE;
+}
+
+// Starts a downward fall event for one slider.
+static void start_slider_event(GameState *state, int row, int col) {
+  state->event.type = EVENT_SLIDER_MOVE;
+  state->event.x = row;
+  state->event.y = col;
+  state->event.dr = 1;
+  state->event.dc = 0;
+}
+
+// Finds the next falling slider and schedules its event.
+static bool schedule_next_slider_event(GameState *state) {
+  if (state->event.type != EVENT_NONE || state->rows <= 1) {
+    return false;
+  }
+
+  for (int row = state->rows - 2; row >= 0; row--) {
+    for (int col = 0; col < state->cols; col++) {
+      if (can_slider_fall_from(state, row, col)) {
+        start_slider_event(state, row, col);
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 // Reports whether any keys are still present on the current board.
@@ -405,7 +447,7 @@ void reset_game(GameState *state) {
 bool is_game_won(GameState *state) {
   for (int i = 0; i < state->rows; i++) {
     for (int j = 0; j < state->cols; j++) {
-      if (state->board[i][j] == GOAL || state->board[i][j] == PLAYER_ON_GOAL || state->board[i][j] == KEY_ON_GOAL) {
+      if (state->board[i][j] == GOAL || state->board[i][j] == PLAYER_ON_GOAL || state->board[i][j] == KEY_ON_GOAL || state->board[i][j] == SLIDER_ON_GOAL) {
         return false;
       }
     }
@@ -472,6 +514,28 @@ bool move_on_ice(GameState *state) {
   return redraw;
 }
 
+// Advances one slider downward by one row when the tile below is empty.
+static bool move_slider(GameState *state) {
+  int new_row = state->event.x + 1;
+  int new_col = state->event.y;
+
+  if (!can_slider_fall_from(state, state->event.x, state->event.y)) {
+    state->event.type = EVENT_NONE;
+    return false;
+  }
+
+  REMOVE_SLIDER(state->event.x, state->event.y);
+  ADD_SLIDER(new_row, new_col);
+  state->event.x = new_row;
+  state->event.y = new_col;
+
+  if (!can_slider_fall_from(state, new_row, new_col)) {
+    state->event.type = EVENT_NONE;
+  }
+
+  return true;
+}
+
 // Attempts to move the player and starts any resulting ice event.
 bool move_player(GameState *state, int dr, int dc) {
   int new_row = state->player_row + dr;
@@ -502,6 +566,9 @@ bool move_player(GameState *state, int dr, int dc) {
       state->event.dr = dr;
       state->event.dc = dc;
       move_on_ice(state);
+    }
+    if (state->event.type == EVENT_NONE) {
+      schedule_next_slider_event(state);
     }
     append_move(&state->history, move);
     return true;
@@ -551,6 +618,9 @@ bool move_player(GameState *state, int dr, int dc) {
     move_on_ice(state);
   }
 
+  if (state->event.type == EVENT_NONE) {
+    schedule_next_slider_event(state);
+  }
   append_move(&state->history, move);
   return true;
 }
@@ -574,11 +644,18 @@ bool process_event(GameState *state) {
     case EVENT_ICE_MOVE:
       redraw = move_on_ice(state);
       break;
+    case EVENT_SLIDER_MOVE:
+      redraw = move_slider(state);
+      break;
     case EVENT_NONE:
       break;
     default:
       perror("Unknown event type");
       state->event.type = EVENT_NONE;
+  }
+
+  if (state->event.type == EVENT_NONE) {
+    schedule_next_slider_event(state);
   }
   return redraw;
 }

@@ -9,6 +9,10 @@
 #define UTF8_KEY_ON_ICE_LEN 3
 #define UTF8_KEY_ON_GOAL "\xE1\xB8\xB3"
 #define UTF8_KEY_ON_GOAL_LEN 3
+#define UTF8_SLIDER_ON_ICE "\xE1\xB9\xBC"
+#define UTF8_SLIDER_ON_ICE_LEN 3
+#define UTF8_SLIDER_ON_GOAL "\xE1\xB9\xBE"
+#define UTF8_SLIDER_ON_GOAL_LEN 3
 
 typedef struct {
   char *data;
@@ -163,6 +167,7 @@ static bool is_ascii_board_char(char ch) {
     case PLAYER_ON_ICE:
     case BOX_ON_ICE:
     case KEY:
+    case SLIDER:
     case LOCK:
     case 'p':
     case 'P':
@@ -207,9 +212,21 @@ static bool read_board_tile(const char *line, size_t len, size_t *cursor, char *
     return true;
   }
 
+  if (len - *cursor >= UTF8_SLIDER_ON_GOAL_LEN && memcmp(line + *cursor, UTF8_SLIDER_ON_GOAL, UTF8_SLIDER_ON_GOAL_LEN) == 0) {
+    *out_tile = SLIDER_ON_GOAL;
+    *cursor += UTF8_SLIDER_ON_GOAL_LEN;
+    return true;
+  }
+
   if (len - *cursor >= UTF8_KEY_ON_ICE_LEN && memcmp(line + *cursor, UTF8_KEY_ON_ICE, UTF8_KEY_ON_ICE_LEN) == 0) {
     *out_tile = KEY_ON_ICE;
     *cursor += UTF8_KEY_ON_ICE_LEN;
+    return true;
+  }
+
+  if (len - *cursor >= UTF8_SLIDER_ON_ICE_LEN && memcmp(line + *cursor, UTF8_SLIDER_ON_ICE, UTF8_SLIDER_ON_ICE_LEN) == 0) {
+    *out_tile = SLIDER_ON_ICE;
+    *cursor += UTF8_SLIDER_ON_ICE_LEN;
     return true;
   }
 
@@ -540,6 +557,9 @@ static bool append_level_line(LevelState *level, const char *line, size_t len) {
       case KEY:
       case KEY_ON_GOAL:
       case KEY_ON_ICE:
+      case SLIDER:
+      case SLIDER_ON_GOAL:
+      case SLIDER_ON_ICE:
       case LOCK:
         level->board[level->rows][col] = tile;
         break;

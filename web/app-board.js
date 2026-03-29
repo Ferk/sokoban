@@ -38,6 +38,15 @@
                 case '\x01':
                     tileElement.classList.add('base-ice', 'overlay-key');
                     break;
+                case 'V':
+                    tileElement.classList.add('overlay-slider');
+                    break;
+                case '\x03':
+                    tileElement.classList.add('base-ice', 'overlay-slider');
+                    break;
+                case '\x04':
+                    tileElement.classList.add('base-goal', 'overlay-slider');
+                    break;
                 case '*':
                     tileElement.classList.add('base-goal', 'overlay-box');
                     break;
