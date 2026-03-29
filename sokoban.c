@@ -11,14 +11,16 @@
 
 #define IS_WALL(x, y) (x < 0 || x >= state->rows || y < 0 || y >= state->cols || state->board[x][y] == WALL || state->board[x][y] == LOCK)
 #define IS_BOX(x, y) ((state->board[x][y] == BOX) || (state->board[x][y] == BOX_ON_GOAL) || (state->board[x][y] == BOX_ON_ICE))
-#define IS_KEY(x, y) (state->board[x][y] == KEY)
+#define IS_KEY(x, y) ((state->board[x][y] == KEY) || (state->board[x][y] == KEY_ON_ICE) || (state->board[x][y] == KEY_ON_GOAL))
 #define IS_PLAYER(x, y) ((state->board[x][y] == PLAYER) || (state->board[x][y] == PLAYER_ON_GOAL) || (state->board[x][y] == PLAYER_ON_ICE))
-#define IS_ICE(x, y) ((state->board[x][y] == ICE) || (state->board[x][y] == PLAYER_ON_ICE) || (state->board[x][y] == BOX_ON_ICE))
+#define IS_ICE(x, y) ((state->board[x][y] == ICE) || (state->board[x][y] == PLAYER_ON_ICE) || (state->board[x][y] == BOX_ON_ICE) || (state->board[x][y] == KEY_ON_ICE))
 
 #define REMOVE_BOX(x, y) state->board[x][y] = ((state->board[x][y] == BOX_ON_GOAL) ? GOAL : ((state->board[x][y] == BOX_ON_ICE) ? ICE : FLOOR))
+#define REMOVE_KEY(x, y) state->board[x][y] = ((state->board[x][y] == KEY_ON_GOAL) ? GOAL : ((state->board[x][y] == KEY_ON_ICE) ? ICE : FLOOR))
 #define REMOVE_PLAYER(x, y) state->board[x][y] = ((state->board[x][y] == PLAYER_ON_GOAL) ? GOAL : ((state->board[x][y] == PLAYER_ON_ICE) ? ICE : FLOOR))
 
 #define ADD_BOX(x, y) state->board[x][y] = ((state->board[x][y] == GOAL) ? BOX_ON_GOAL : ((state->board[x][y] == ICE) ? BOX_ON_ICE : BOX))
+#define ADD_KEY(x, y) state->board[x][y] = ((state->board[x][y] == GOAL) ? KEY_ON_GOAL : ((state->board[x][y] == ICE) ? KEY_ON_ICE : KEY))
 #define ADD_PLAYER(x, y) state->board[x][y] = ((state->board[x][y] == GOAL) ? PLAYER_ON_GOAL : ((state->board[x][y] == ICE) ? PLAYER_ON_ICE : PLAYER))
 
 // Grows the move history buffer when a new move would exceed its capacity.
@@ -102,7 +104,7 @@ static bool decode_move(char move, int *dr, int *dc) {
 static bool has_any_keys(GameState *state) {
   for (int row = 0; row < state->rows; row++) {
     for (int col = 0; col < state->cols; col++) {
-      if (state->board[row][col] == KEY) {
+      if (state->board[row][col] == KEY || state->board[row][col] == KEY_ON_ICE || state->board[row][col] == KEY_ON_GOAL) {
         return true;
       }
     }
@@ -133,9 +135,9 @@ static void move_player_to_tile(GameState *state, int new_row, int new_col) {
   state->player_col = new_col;
 }
 
-// Consumes a key tile and moves the player onto the cleared floor.
+// Consumes a key tile and moves the player onto the restored floor or ice.
 static void consume_key_and_move_player(GameState *state, int key_row, int key_col) {
-  state->board[key_row][key_col] = FLOOR;
+  REMOVE_KEY(key_row, key_col);
   move_player_to_tile(state, key_row, key_col);
   unlock_locks_if_needed(state);
 }
@@ -403,7 +405,7 @@ void reset_game(GameState *state) {
 bool is_game_won(GameState *state) {
   for (int i = 0; i < state->rows; i++) {
     for (int j = 0; j < state->cols; j++) {
-      if (state->board[i][j] == GOAL || state->board[i][j] == PLAYER_ON_GOAL) {
+      if (state->board[i][j] == GOAL || state->board[i][j] == PLAYER_ON_GOAL || state->board[i][j] == KEY_ON_GOAL) {
         return false;
       }
     }
@@ -411,7 +413,7 @@ bool is_game_won(GameState *state) {
   return true;
 }
 
-// Advances the current sliding event for a player or box on ice.
+// Advances the current sliding event for a player, box, or key on ice.
 bool move_on_ice(GameState *state) {
   bool redraw = false;
 
@@ -421,6 +423,23 @@ bool move_on_ice(GameState *state) {
   if (IS_WALL(new_x, new_y)) {
     // hit a wall! stop
     state->event.type = EVENT_NONE;
+  } else if (IS_KEY(new_x, new_y)) {
+    if (IS_PLAYER(state->event.x, state->event.y)) {
+      consume_key_and_move_player(state, new_x, new_y);
+      redraw = true;
+      if (state->board[new_x][new_y] == PLAYER_ON_ICE) {
+        state->event.x = new_x;
+        state->event.y = new_y;
+      } else {
+        state->event.type = EVENT_NONE;
+      }
+    } else {
+      // hit a key! event transfers to the key for next tic
+      state->event.x = new_x;
+      state->event.y = new_y;
+      new_x = state->event.x + state->event.dr;
+      new_y = state->event.y + state->event.dc;
+    }
   } else if (IS_BOX(new_x, new_y)) {
     // hit a box! event transfers to the box for next tic
     // (it may chain if there's a stack of boxes!)
@@ -428,19 +447,16 @@ bool move_on_ice(GameState *state) {
     state->event.y = new_y;
     new_x = state->event.x + state->event.dr;
     new_y = state->event.y + state->event.dc;
-  } else if (IS_KEY(new_x, new_y)) {
-    if (IS_PLAYER(state->event.x, state->event.y)) {
-      consume_key_and_move_player(state, new_x, new_y);
-      redraw = true;
-    }
-    state->event.type = EVENT_NONE;
   } else {
-    // Move the player or the box
+    // Move the player, box, or key.
     if (IS_PLAYER(state->event.x, state->event.y)) {
       move_player_to_tile(state, new_x, new_y);
     } else if (IS_BOX(state->event.x, state->event.y)) {
       REMOVE_BOX(state->event.x, state->event.y);
       ADD_BOX(new_x, new_y);
+    } else if (IS_KEY(state->event.x, state->event.y)) {
+      REMOVE_KEY(state->event.x, state->event.y);
+      ADD_KEY(new_x, new_y);
     }
     redraw = true;
 
@@ -479,6 +495,14 @@ bool move_player(GameState *state, int dr, int dc) {
     }
 
     consume_key_and_move_player(state, new_row, new_col);
+    if (state->board[new_row][new_col] == PLAYER_ON_ICE) {
+      state->event.type = EVENT_ICE_MOVE;
+      state->event.x = new_row;
+      state->event.y = new_col;
+      state->event.dr = dr;
+      state->event.dc = dc;
+      move_on_ice(state);
+    }
     append_move(&state->history, move);
     return true;
   }

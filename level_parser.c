@@ -5,6 +5,10 @@
 #include <string.h>
 
 #define LINE_BUFFER_SIZE 4096
+#define UTF8_KEY_ON_ICE "\xE1\xB8\xB5"
+#define UTF8_KEY_ON_ICE_LEN 3
+#define UTF8_KEY_ON_GOAL "\xE1\xB8\xB3"
+#define UTF8_KEY_ON_GOAL_LEN 3
 
 typedef struct {
   char *data;
@@ -145,8 +149,8 @@ static void trim_trailing_blank_lines(TextBuffer *buffer) {
   }
 }
 
-// Reports whether a character is accepted as part of a Sokoban board row.
-static bool is_board_char(char ch) {
+// Reports whether an ASCII character is accepted as part of a Sokoban board row.
+static bool is_ascii_board_char(char ch) {
   switch (ch) {
     case FLOOR:
     case WALL:
@@ -172,8 +176,8 @@ static bool is_board_char(char ch) {
   }
 }
 
-// Maps legacy board characters to the normalized internal tile set.
-static char normalize_board_char(char ch) {
+// Maps legacy ASCII board characters to the normalized internal tile set.
+static char normalize_ascii_board_char(char ch) {
   switch (ch) {
     case 'p':
       return PLAYER;
@@ -191,18 +195,50 @@ static char normalize_board_char(char ch) {
   }
 }
 
+// Decodes one board tile from a line, including UTF-8 key variants.
+static bool read_board_tile(const char *line, size_t len, size_t *cursor, char *out_tile) {
+  if (*cursor >= len) {
+    return false;
+  }
+
+  if (len - *cursor >= UTF8_KEY_ON_GOAL_LEN && memcmp(line + *cursor, UTF8_KEY_ON_GOAL, UTF8_KEY_ON_GOAL_LEN) == 0) {
+    *out_tile = KEY_ON_GOAL;
+    *cursor += UTF8_KEY_ON_GOAL_LEN;
+    return true;
+  }
+
+  if (len - *cursor >= UTF8_KEY_ON_ICE_LEN && memcmp(line + *cursor, UTF8_KEY_ON_ICE, UTF8_KEY_ON_ICE_LEN) == 0) {
+    *out_tile = KEY_ON_ICE;
+    *cursor += UTF8_KEY_ON_ICE_LEN;
+    return true;
+  }
+
+  if (!is_ascii_board_char(line[*cursor])) {
+    return false;
+  }
+
+  *out_tile = normalize_ascii_board_char(line[*cursor]);
+  (*cursor)++;
+  return true;
+}
+
 // Checks whether an entire line looks like board data.
 static bool is_board_line(const char *line, size_t len) {
+  size_t cursor = 0;
+  size_t tile_count = 0;
+  char tile = '\0';
+
   if (len == 0) {
     return false;
   }
 
-  for (size_t i = 0; i < len; i++) {
-    if (!is_board_char(line[i])) {
+  while (cursor < len) {
+    if (!read_board_tile(line, len, &cursor, &tile)) {
       return false;
     }
+    tile_count++;
   }
-  return true;
+  return tile_count > 0;
 }
 
 // Identifies comment lines that should be ignored by metadata parsing.
@@ -474,19 +510,26 @@ static LineReaderResult next_line(LineReader *reader, const char **out_line, siz
 
 // Copies one parsed board row into the target level state.
 static bool append_level_line(LevelState *level, const char *line, size_t len) {
-  if (level->rows >= MAX_ROWS || len > MAX_COLS) {
+  size_t cursor = 0;
+  size_t col = 0;
+
+  if (level->rows >= MAX_ROWS) {
     return false;
   }
 
-  for (size_t i = 0; i < len; i++) {
-    char tile = normalize_board_char(line[i]);
+  while (cursor < len) {
+    char tile = '\0';
+
+    if (col >= MAX_COLS || !read_board_tile(line, len, &cursor, &tile)) {
+      return false;
+    }
 
     switch (tile) {
       case PLAYER:
       case PLAYER_ON_GOAL:
       case PLAYER_ON_ICE:
         level->player_row = level->rows;
-        level->player_col = (int)i;
+        level->player_col = (int)col;
         /* FALLTHROUGH */
       case WALL:
       case GOAL:
@@ -495,21 +538,25 @@ static bool append_level_line(LevelState *level, const char *line, size_t len) {
       case BOX_ON_GOAL:
       case BOX_ON_ICE:
       case KEY:
+      case KEY_ON_GOAL:
+      case KEY_ON_ICE:
       case LOCK:
-        level->board[level->rows][i] = tile;
+        level->board[level->rows][col] = tile;
         break;
       default:
-        level->board[level->rows][i] = FLOOR;
+        level->board[level->rows][col] = FLOOR;
         break;
     }
+
+    col++;
   }
 
-  for (size_t i = len; i < MAX_COLS; i++) {
+  for (size_t i = col; i < MAX_COLS; i++) {
     level->board[level->rows][i] = FLOOR;
   }
 
-  if (level->cols < (int)len) {
-    level->cols = (int)len;
+  if (level->cols < (int)col) {
+    level->cols = (int)col;
   }
   level->rows++;
   return true;

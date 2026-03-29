@@ -32,6 +32,12 @@
                 case 'k':
                     tileElement.classList.add('overlay-key');
                     break;
+                case '\x02':
+                    tileElement.classList.add('base-goal', 'overlay-key');
+                    break;
+                case '\x01':
+                    tileElement.classList.add('base-ice', 'overlay-key');
+                    break;
                 case '*':
                     tileElement.classList.add('base-goal', 'overlay-box');
                     break;
